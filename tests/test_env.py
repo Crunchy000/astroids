@@ -76,3 +76,17 @@ def test_rgb_render():
     frame = env.render()
     assert frame.shape == (720, 1280, 3) and frame.dtype == np.uint8 and frame.any()
     env.close()
+
+
+def test_callable_policies_get_one_batched_call_per_step():
+    calls = []
+
+    def policy(obs):
+        calls.append(obs.shape)
+        return np.tile([2, 1, 1], (len(obs), 1))  # turn right, thrust, fire
+
+    env = AsteroidsBattleEnv(opponents=policy, teammates="idle")
+    env.reset(seed=0)
+    env.step(env.action_space.sample())
+    assert calls == [(5, env.observation_space.shape[0])]
+    assert any(s.thrusting for s in env.sim.ships[5:])

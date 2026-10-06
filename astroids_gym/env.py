@@ -14,7 +14,9 @@ from .obs import ObsConfig, encode, observation_space
 from .sim import Config, Events, Simulation
 
 # Policy for ships the learner doesn't control: "scripted" (built-in bot),
-# "idle", "random", or a callable mapping an observation to a MultiDiscrete action.
+# "idle", "random", or a callable mapping a batch of observations, shape
+# (n_ships, obs_dim), to a batch of MultiDiscrete actions, shape (n_ships, 3).
+# An SB3 model works directly: ``lambda obs: model.predict(obs)[0]``.
 Policy = Union[str, Callable[[np.ndarray], Any], None]
 
 ACTION_SPACE = spaces.MultiDiscrete([3, 2, 2])  # turn (left/none/right), thrust, fire
@@ -77,6 +79,7 @@ class _Match:
     def _policy_actions(self, policies: dict[int, Policy], rng: np.random.Generator):
         """Decide actions for ships with a non-scripted fixed policy (once per agent step)."""
         out = {}
+        batches: dict[int, tuple[Callable, list[int]]] = {}
         for sid, pol in policies.items():
             if pol in (None, "scripted"):
                 continue
@@ -85,18 +88,24 @@ class _Match:
             elif pol == "random":
                 out[sid] = decode_action(rng.integers(0, ACTION_SPACE.nvec))
             else:
-                out[sid] = decode_action(pol(self._obs(sid)))
+                batches.setdefault(id(pol), (pol, []))[1].append(sid)
+        # One call per callable with all its ships' observations stacked.
+        for pol, sids in batches.values():
+            acts = np.asarray(pol(np.stack([self._obs(sid) for sid in sids])))
+            for sid, a in zip(sids, acts.reshape(len(sids), -1)):
+                out[sid] = decode_action(a)
         return out
 
     def _advance(self, learner_actions: dict[int, tuple], policies: dict[int, Policy],
                  rng: np.random.Generator) -> Events:
-        fixed = {**self._policy_actions(policies, rng), **learner_actions}
-        scripted = [sid for sid, pol in policies.items() if pol in (None, "scripted")]
+        acts = self._policy_actions(policies, rng)
+        for sid, pol in policies.items():
+            # Like every other pilot, the bot decides once per agent step.
+            if pol in (None, "scripted"):
+                acts[sid] = scripted_action(self.sim, self.sim.ships[sid], self.frame_skip)
+        acts.update(learner_actions)
         total = Events(self.sim.n_ships)
         for _ in range(self.frame_skip):
-            acts = dict(fixed)
-            for sid in scripted:  # the bot re-plans every physics tick, as in the browser
-                acts[sid] = scripted_action(self.sim, self.sim.ships[sid])
             total.merge(self.sim.step(acts))
         self._steps += 1
         return total

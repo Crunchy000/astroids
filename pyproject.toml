@@ -13,7 +13,7 @@ dependencies = ["gymnasium>=0.29", "numpy>=1.24"]
 [project.optional-dependencies]
 render = ["pygame>=2.5"]
 multiagent = ["pettingzoo>=1.24"]
-train = ["stable-baselines3>=2.3", "torch"]
+train = ["stable-baselines3>=2.3", "torch", "tensorboard"]
 dev = ["pytest", "pygame>=2.5", "pettingzoo>=1.24"]
 
 [tool.setuptools]

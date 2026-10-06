@@ -9,8 +9,12 @@ from .sim import Ship, Simulation, wrap_angle
 Action = tuple[float, bool, bool]
 
 
-def scripted_action(sim: Simulation, s: Ship) -> Action:
-    """Chase the nearest enemy, lead shots, dodge bullets and asteroids."""
+def scripted_action(sim: Simulation, s: Ship, horizon: int = 1) -> Action:
+    """Chase the nearest enemy, lead shots, dodge bullets and asteroids.
+
+    ``horizon`` is how many physics ticks the action will be held for; the turn
+    command is scaled so the ship doesn't overshoot its desired heading.
+    """
     cfg = sim.cfg
     if not s.alive:
         return (0.0, False, False)
@@ -57,15 +61,18 @@ def scripted_action(sim: Simulation, s: Ship) -> Action:
             desired = math.atan2(dy, dx) + math.pi * 0.6 * (1 if s.wander >= 0 else -1)
             thrust = abs(wrap_angle(desired - s.a)) < 0.8
     else:
-        s.wander += sim.rand(-1, 1) * cfg.dt
+        s.wander += sim.rand(-1, 1) * cfg.dt * horizon
         desired = s.a + s.wander
 
     # Dodge enemy bullets heading our way and nearby asteroids.
     ax = ay = threat = 0.0
+    ww, wh = cfg.width, cfg.height
+    hw, hh = ww / 2, wh / 2
     for bl in sim.bullets:
         if bl.team == s.team:
             continue
-        dx, dy = sim.wdx(bl.x, s.x), sim.wdy(bl.y, s.y)
+        dx = (s.x - bl.x + hw) % ww - hw  # inlined sim.wdx / sim.wdy (hot loop)
+        dy = (s.y - bl.y + hh) % wh - hh
         d2 = dx * dx + dy * dy
         if d2 > 140 * 140 or dx * bl.vx + dy * bl.vy <= 0:
             continue
@@ -90,5 +97,5 @@ def scripted_action(sim: Simulation, s: Ship) -> Action:
         fire = fire and threat < 1
 
     diff = wrap_angle(desired - s.a)
-    turn = max(-1.0, min(1.0, diff / (cfg.turn_rate * cfg.dt)))
+    turn = max(-1.0, min(1.0, diff / (cfg.turn_rate * cfg.dt * horizon)))
     return (turn, thrust, fire)

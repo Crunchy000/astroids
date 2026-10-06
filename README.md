@@ -38,7 +38,7 @@ for _ in range(1800):
 | **Episode** | Ships respawn, so an episode ends only at `max_steps` (default 1800 agent steps = 60 s of game time). `terminate_on_death=True` gives shorter episodes. |
 | **Timing** | Physics runs at 60 Hz; the agent acts every `frame_skip=2` ticks (30 Hz). |
 
-Useful kwargs: `teammates=` / `opponents=` take `"scripted"`, `"idle"`, `"random"` or any `callable(obs) -> action`, so you can do self-play against frozen policies. You can also pass `config=Config(asteroids=False, team_size=3, ...)`, `reward_config=RewardConfig(...)` and `obs_config=ObsConfig(...)`.
+Useful kwargs: `teammates=` / `opponents=` take `"scripted"`, `"idle"`, `"random"` or a callable, so you can do self-play against frozen policies. A callable gets one batch of observations for all the ships it flies, shape `(n, 150)`, and returns `(n, 3)` actions, so an SB3 model plugs straight in: `opponents=lambda obs: model.predict(obs)[0]`. You can also pass `config=Config(asteroids=False, team_size=3, ...)`, `reward_config=RewardConfig(...)` and `obs_config=ObsConfig(...)`.
 
 ## Multi-agent env (PettingZoo Parallel API)
 
@@ -66,9 +66,9 @@ python examples/evaluate.py --model models/ppo_pilot.zip --render
 python examples/train_ppo.py --opponent-model models/ppo_pilot.zip --out models/ppo_gen2
 ```
 
-Baselines over 3 seeded 60 s episodes: random pilot ≈ −7.1 return (K/D 0.22); scripted bot ≈ +1.3 return (K/D 1.09). A trained agent should beat the scripted bot.
+Baselines over 3 seeded 60 s episodes: random pilot ≈ −9.9 return (K/D 0.09); scripted bot ≈ +1.0 return (K/D 1.10). A trained agent should beat the scripted bot.
 
-One process runs about 2,000 agent steps/s (pure Python), so use `--n-envs` set to your core count.
+Speed: the bare env runs about 2,800 agent steps/s per process (pure Python, nine scripted bots). With PPO in the loop, a 4-core machine manages about 900 steps/s end to end, so set `--n-envs` to your core count. The trainer keeps PyTorch to one thread (`--torch-threads`) so it doesn't starve the env workers.
 
 ## Tests
 

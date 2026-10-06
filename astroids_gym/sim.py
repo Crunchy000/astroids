@@ -98,6 +98,8 @@ class Simulation:
 
     def __init__(self, config: Config | None = None, seed: int | None = None):
         self.cfg = config or Config()
+        self._w, self._h = self.cfg.width, self.cfg.height
+        self._hw, self._hh = self._w / 2, self._h / 2
         self.rng = np.random.default_rng(seed)
         self.reset(seed)
 
@@ -107,22 +109,10 @@ class Simulation:
 
     def wdx(self, a: float, b: float) -> float:
         """Shortest x-delta from a to b on the wrapping world."""
-        w = self.cfg.width
-        d = b - a
-        if d > w / 2:
-            d -= w
-        elif d < -w / 2:
-            d += w
-        return d
+        return (b - a + self._hw) % self._w - self._hw
 
     def wdy(self, a: float, b: float) -> float:
-        h = self.cfg.height
-        d = b - a
-        if d > h / 2:
-            d -= h
-        elif d < -h / 2:
-            d += h
-        return d
+        return (b - a + self._hh) % self._h - self._hh
 
     def _wrap(self, o) -> None:
         o.x %= self.cfg.width
@@ -293,6 +283,7 @@ class Simulation:
     def _bullets(self, ev: Events) -> None:
         dt = self.cfg.dt
         r2 = self.cfg.ship_r ** 2
+        w, h, hw, hh = self._w, self._h, self._hw, self._hh
         keep = []
         for bl in self.bullets:
             bl.x += bl.vx * dt
@@ -304,7 +295,8 @@ class Simulation:
                 for s in self.ships:
                     if not s.alive or s.team == bl.team:
                         continue
-                    dx, dy = self.wdx(bl.x, s.x), self.wdy(bl.y, s.y)
+                    dx = (s.x - bl.x + hw) % w - hw  # inlined wdx / wdy (hot loop)
+                    dy = (s.y - bl.y + hh) % h - hh
                     if dx * dx + dy * dy < r2:
                         self._hit(s, bl.owner, ev)
                         dead = True

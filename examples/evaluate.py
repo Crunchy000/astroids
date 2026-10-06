@@ -10,7 +10,6 @@ import argparse
 import gymnasium as gym
 import numpy as np
 
-import astroids_gym
 from astroids_gym import scripted_action
 
 
