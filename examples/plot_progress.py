@@ -61,6 +61,9 @@ def plot(json_path, png_path=None, aim_anneal=None):
         for side in ("top", "right", "left"):
             ax.spines[side].set_visible(False)
         ax.spines["bottom"].set_color(GRID)
+        if "%" in fmt:
+            from matplotlib.ticker import PercentFormatter
+            ax.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
         lo, hi = min(y + [bot[key]]), max(y + [bot[key]])
         pad = (hi - lo) * 0.12 or 0.5
         ax.set_ylim(lo - pad, hi + pad)
@@ -69,8 +72,14 @@ def plot(json_path, png_path=None, aim_anneal=None):
                          xytext=(0, -4), textcoords="offset points", ha="center", va="top",
                          color=TEXT_2, fontsize=9)
     axes[1].set_xlabel(data.get("xlabel", "Training steps (millions)"), color=TEXT_2, fontsize=10)
-    axes[1].set_xlim(0, max(max(x), (aim_anneal or 0) / 1e6, 0.1) * 1.1)
-    axes[0].legend(loc="lower right", frameon=False, fontsize=9, labelcolor=TEXT)
+    xmax = max(max(x), (aim_anneal or 0) / 1e6, 0.1)
+    # A little room left of the first point so the bot's direct label never sits on the data.
+    axes[1].set_xlim(-0.14 * xmax, xmax * 1.1)
+    axes[1].xaxis.set_major_locator(__import__("matplotlib.ticker", fromlist=["MaxNLocator"]).MaxNLocator(steps=[1, 2, 2.5, 5, 10]))
+    axes[1].set_xticks([t for t in axes[1].get_xticks() if t >= 0])
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="upper right", ncol=2, frameon=False, fontsize=9,
+               labelcolor=TEXT, bbox_to_anchor=(0.99, 0.995))
     fig.suptitle(data.get("title", "PPO agent vs built-in bot, blue seat 0 (20 battles per point)"),
                  x=0.02, ha="left", color=TEXT_2, fontsize=10)
     fig.tight_layout()

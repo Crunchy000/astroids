@@ -1,9 +1,57 @@
 {
   "sections": [
     {
+      "id": "team",
+      "title": "A trained team beats the bot team",
+      "summary": "One shared PPO policy flies all five blue ships against the built-in bots, each ship getting half of its teammates' kill and death rewards. It started from the single-seat agent; after 2M ship-steps of team training (under 20 minutes on 4 CPU cores) it wins 90% of battles. Training is still running; a check on battles it was never evaluated on will follow.",
+      "table": {
+        "columns": [
+          "Blue team flown by",
+          "Win rate",
+          "Avg kill margin"
+        ],
+        "rows": [
+          [
+            "Team-trained PPO (2M ship-steps)",
+            "90%",
+            "+9.8"
+          ],
+          [
+            "Single-seat agent, before team training",
+            "45%",
+            "−0.8"
+          ],
+          [
+            "Built-in bots",
+            "50%",
+            "−0.8"
+          ]
+        ],
+        "highlight": 0
+      },
+      "chart": {
+        "src": "results/team_progress.png",
+        "alt": "Team training progress: blue's win rate climbs from 45% to 90% and its average kill margin from -0.8 to +9.8 within 2M ship-steps; the all-bot team sits at 50% and -0.8."
+      },
+      "videos": [
+        {
+          "src": "results/team_trained.mp4",
+          "title": "Team-trained agent flying all of blue",
+          "note": "Same battle as the other clips. Blue wins 42–29.",
+          "poster": "results/team_trained.jpg"
+        },
+        {
+          "src": "results/team_bots.mp4",
+          "title": "Built-in bots flying all of blue",
+          "note": "Same battle. Blue loses 34–44.",
+          "poster": "results/team_bots.jpg"
+        }
+      ]
+    },
+    {
       "id": "single",
       "title": "One trained agent among bots",
-      "summary": "A PPO agent flies blue ship 0; the other nine ships are the built-in bot. After 3.5M training steps it beats the bot playing the same seat, on 50 battles it never trained on.",
+      "summary": "A PPO agent flies blue ship 0; the other nine ships are the built-in bot. After 3.5M training steps it beats the bot playing the same seat, on 50 battles it never trained on. On its own it doesn't help a whole team: five copies win about as often as five bots, which is why the team training above was needed.",
       "table": {
         "columns": [
           "Blue ship 0 flown by",
@@ -46,12 +94,6 @@
           "title": "Bot in blue ship 0",
           "note": "Same battle, the bot in that seat. Blue loses 34–44.",
           "poster": "results/bot_seat0.jpg"
-        },
-        {
-          "src": "results/agent_team.mp4",
-          "title": "Single-seat agent flying all of blue",
-          "note": "Before team training: it plays as well as the bots, not better (8 vs 10 wins in 20 battles).",
-          "poster": "results/agent_team.jpg"
         }
       ]
     }
