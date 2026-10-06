@@ -7,8 +7,9 @@ y' = right) and scaled into ``[-1, 1]``. Each entity slot starts with a
 Layout (default sizes):
 
 * self (8):        alive, vx', vy', sin(a), cos(a), hp, cooldown, invulnerable
-* enemies 5 x 8:   present, dx', dy', dvx', dvy', sin(rel heading), cos(rel heading), hp
-* allies 4 x 8:    same as enemies
+* enemies 5 x 10:  present, dx', dy', dvx', dvy', sin(rel heading), cos(rel heading), hp,
+                   cos/sin of the lead direction (where to point to hit it)
+* allies 4 x 8:    same as enemies, without the lead direction
 * bullets 8 x 5:   present, dx', dy', dvx', dvy'   (nearest enemy bullets)
 * asteroids 5 x 6: present, dx', dy', dvx', dvy', radius
 """
@@ -21,10 +22,12 @@ from dataclasses import dataclass
 import numpy as np
 from gymnasium import spaces
 
+from .bot import lead
 from .sim import Ship, Simulation
 
 SELF_DIM = 8
 SHIP_DIM = 8
+ENEMY_DIM = SHIP_DIM + 2
 BULLET_DIM = 5
 ASTEROID_DIM = 6
 
@@ -38,7 +41,7 @@ class ObsConfig:
 
     @property
     def size(self) -> int:
-        return (SELF_DIM + (self.n_enemies + self.n_allies) * SHIP_DIM
+        return (SELF_DIM + self.n_enemies * ENEMY_DIM + self.n_allies * SHIP_DIM
                 + self.n_bullets * BULLET_DIM + self.n_asteroids * ASTEROID_DIM)
 
 
@@ -74,18 +77,20 @@ def encode(sim: Simulation, s: Ship, oc: ObsConfig) -> np.ndarray:
         scored.sort(key=lambda t: t[0])
         return scored[:k]
 
-    for team_pick, k in ((lambda o: o.team != s.team, oc.n_enemies),
-                         (lambda o: o.team == s.team and o is not s, oc.n_allies)):
-        others = [o for o in sim.ships if o.alive and team_pick(o)]
+    for enemies, k, dim in ((True, oc.n_enemies, ENEMY_DIM), (False, oc.n_allies, SHIP_DIM)):
+        others = [o for o in sim.ships
+                  if o.alive and o is not s and (o.team != s.team) == enemies]
         for j, (_, dx, dy, o) in enumerate(nearest(others, k)):
             px, py = rot(dx, dy)
             rvx, rvy = rot(o.vx - s.vx, o.vy - s.vy)
             rel = o.a - s.a
-            out[i + j * SHIP_DIM:i + (j + 1) * SHIP_DIM] = (
-                1.0, px * pos_scale, py * pos_scale, rvx * ship_v_scale, rvy * ship_v_scale,
-                math.sin(rel), math.cos(rel), o.hp / cfg.ship_hp,
-            )
-        i += k * SHIP_DIM
+            feats = [1.0, px * pos_scale, py * pos_scale, rvx * ship_v_scale, rvy * ship_v_scale,
+                     math.sin(rel), math.cos(rel), o.hp / cfg.ship_hp]
+            if enemies:
+                aim = lead(sim, s, o)[0] - s.a
+                feats += [math.cos(aim), math.sin(aim)]
+            out[i + j * dim:i + (j + 1) * dim] = feats
+        i += k * dim
 
     enemy_bullets = [b for b in sim.bullets if b.team != s.team]
     for j, (_, dx, dy, b) in enumerate(nearest(enemy_bullets, oc.n_bullets)):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Callable, Union
 
@@ -9,9 +10,9 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
-from .bot import scripted_action
+from .bot import lead, scripted_action
 from .obs import ObsConfig, encode, observation_space
-from .sim import Config, Events, Simulation
+from .sim import Config, Events, Simulation, wrap_angle
 
 # Policy for ships the learner doesn't control: "scripted" (built-in bot),
 # "idle", "random", or a callable mapping a batch of observations, shape
@@ -19,12 +20,15 @@ from .sim import Config, Events, Simulation
 # An SB3 model works directly: ``lambda obs: model.predict(obs)[0]``.
 Policy = Union[str, Callable[[np.ndarray], Any], None]
 
-ACTION_SPACE = spaces.MultiDiscrete([3, 2, 2])  # turn (left/none/right), thrust, fire
+# Turn as a fraction of max turn rate (negative = left). The slow settings give
+# the fine aim control that a full-rate turn per step (~8 degrees) lacks.
+TURN_LEVELS = (-1.0, -0.25, 0.0, 0.25, 1.0)
+ACTION_SPACE = spaces.MultiDiscrete([len(TURN_LEVELS), 2, 2])  # turn, thrust, fire
 
 
 def decode_action(action) -> tuple[float, bool, bool]:
     a = np.asarray(action).reshape(-1)
-    return (float(a[0]) - 1.0, bool(a[1]), bool(a[2]))
+    return (TURN_LEVELS[int(a[0])], bool(a[1]), bool(a[2]))
 
 
 @dataclass
@@ -36,6 +40,26 @@ class RewardConfig:
     shot: float = 0.0  # set slightly negative to discourage spraying
     # Fraction of each teammate's (kill + death) reward also given to this ship.
     team_spirit: float = 0.0
+    # Shaping: per agent step, up to ``aim`` for pointing where a bullet fired now
+    # would hit the nearest enemy in range (Gaussian in the aim error, width
+    # ``aim_width`` radians). Leave at 0 for the true game score.
+    aim: float = 0.0
+    aim_width: float = 0.15
+
+    def aim_bonus(self, sim: Simulation, s) -> float:
+        if not s.alive:
+            return 0.0
+        rng2 = (sim.cfg.bullet_speed * sim.cfg.bullet_life * 0.9) ** 2
+        best, best_d2 = None, rng2
+        for o in sim.ships:
+            if o.alive and o.team != s.team:
+                d2 = sim.wdx(s.x, o.x) ** 2 + sim.wdy(s.y, o.y) ** 2
+                if d2 < best_d2:
+                    best, best_d2 = o, d2
+        if best is None:
+            return 0.0
+        err = wrap_angle(lead(sim, s, best)[0] - s.a)
+        return self.aim * math.exp(-(err / self.aim_width) ** 2)
 
     def individual(self, ev: Events, i: int) -> float:
         return (self.kill * ev.kills[i] + self.death * ev.deaths[i]
@@ -44,6 +68,8 @@ class RewardConfig:
 
     def rewards(self, sim: Simulation, ev: Events) -> list[float]:
         own = [self.individual(ev, i) for i in range(sim.n_ships)]
+        if self.aim:
+            own = [r + self.aim_bonus(sim, s) for r, s in zip(own, sim.ships)]
         if not self.team_spirit:
             return own
         team_kd = [0.0, 0.0]
@@ -133,7 +159,9 @@ class AsteroidsBattleEnv(_Match, gym.Env):
     by time limit (``max_steps``) unless ``terminate_on_death`` is set.
 
     Observation: ``Box(-1, 1, (150,))`` ego-centric features (see ``obs.py``).
-    Action: ``MultiDiscrete([3, 2, 2])`` = (turn left/none/right, thrust, fire).
+    Action: ``MultiDiscrete([5, 2, 2])`` = (turn, thrust, fire); turn indexes
+    ``TURN_LEVELS`` (full left, slow left, none, slow right, full right).
+    ``step(None)`` lets the built-in bot fly your ship (a baseline to compare against).
     """
 
     def __init__(self, render_mode: str | None = None, *, config: Config | None = None,
@@ -161,13 +189,22 @@ class AsteroidsBattleEnv(_Match, gym.Env):
         return self._obs(self.controlled), self._info()
 
     def step(self, action):
-        ev = self._advance({self.controlled: decode_action(action)}, self.policies, self.np_random)
+        if action is None:  # baseline: the scripted bot flies this ship
+            act = scripted_action(self.sim, self.sim.ships[self.controlled], self.frame_skip)
+        else:
+            act = decode_action(action)
+        ev = self._advance({self.controlled: act}, self.policies, self.np_random)
         reward = self.reward_cfg.rewards(self.sim, ev)[self.controlled]
         terminated = self.terminate_on_death and ev.deaths[self.controlled] > 0
         truncated = self._steps >= self.max_steps
         if self.render_mode == "human":
             self.render()
         return self._obs(self.controlled), float(reward), terminated, truncated, self._info()
+
+    def set_reward_weights(self, **weights) -> None:
+        """Change ``RewardConfig`` fields mid-training (e.g. anneal ``aim``) via ``env_method``."""
+        for k, v in weights.items():
+            setattr(self.reward_cfg, k, v)
 
     def render(self):
         return super().render({self.controlled})

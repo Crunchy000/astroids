@@ -4,7 +4,7 @@ import gymnasium as gym
 from gymnasium.utils.env_checker import check_env
 
 import astroids_gym  # noqa: F401  (registers AsteroidsBattle-v0)
-from astroids_gym import AsteroidsBattleEnv, AsteroidsBattleParallelEnv, Config, Simulation, scripted_action
+from astroids_gym import AsteroidsBattleEnv, RewardConfig, AsteroidsBattleParallelEnv, Config, Simulation, scripted_action
 
 
 def test_gymnasium_env_checker():
@@ -48,7 +48,7 @@ def test_terminate_on_death():
     env = AsteroidsBattleEnv(terminate_on_death=True, opponents="scripted", teammates="idle")
     env.reset(seed=0)
     for _ in range(5000):
-        *_, term, trunc, info = env.step(np.array([1, 0, 0]))  # sit still
+        *_, term, trunc, info = env.step(np.array([2, 0, 0]))  # sit still
         if term or trunc:
             break
     assert term and info["deaths"] == 1
@@ -83,10 +83,47 @@ def test_callable_policies_get_one_batched_call_per_step():
 
     def policy(obs):
         calls.append(obs.shape)
-        return np.tile([2, 1, 1], (len(obs), 1))  # turn right, thrust, fire
+        return np.tile([2, 1, 1], (len(obs), 1))  # no turn, thrust, fire
 
     env = AsteroidsBattleEnv(opponents=policy, teammates="idle")
     env.reset(seed=0)
     env.step(env.action_space.sample())
     assert calls == [(5, env.observation_space.shape[0])]
     assert any(s.thrusting for s in env.sim.ships[5:])
+
+
+def test_observation_layout():
+    env = AsteroidsBattleEnv()
+    obs, _ = env.reset(seed=0)
+    assert obs.shape == (160,)
+    assert obs[0] == 1.0  # alive
+    assert obs[8] == 1.0  # first enemy slot present
+
+
+def test_aim_bonus_rewards_pointing_at_the_lead_point():
+    from astroids_gym.bot import lead
+
+    env = AsteroidsBattleEnv(reward_config=RewardConfig(aim=1.0), opponents="idle", teammates="idle")
+    env.reset(seed=0)
+    sim = env.sim
+    me, foe = sim.ships[0], sim.ships[5]
+    for s in sim.ships[1:]:
+        if s is not foe:
+            s.alive, s.respawn = False, 1e9
+    me.x, me.y, foe.x, foe.y = 300.0, 300.0, 600.0, 300.0
+    me.a = lead(sim, me, foe)[0]
+    on_target = env.reward_cfg.aim_bonus(sim, me)
+    me.a += 1.0
+    assert on_target > 0.99 and env.reward_cfg.aim_bonus(sim, me) < 0.01
+    env.set_reward_weights(aim=0.0)
+    assert env.reward_cfg.rewards(sim, astroids_gym.sim.Events(sim.n_ships))[0] == 0.0
+
+
+def test_step_none_lets_the_bot_fly():
+    env = AsteroidsBattleEnv(max_steps=1800)
+    env.reset(seed=0)
+    done = False
+    while not done:
+        *_, term, trunc, info = env.step(None)
+        done = term or trunc
+    assert info["kills"] > 0

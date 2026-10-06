@@ -28,6 +28,7 @@ class Renderer:
         self.sim = sim
         self.mode = mode
         self.fps = fps
+        self.caption = ""  # optional text drawn top-right (e.g. who is flying)
         size = (int(sim.cfg.width), int(sim.cfg.height))
         pygame.init()
         if mode == "human":
@@ -94,6 +95,9 @@ class Renderer:
 
         hud = f"BLUE {sim.score[0]}   RED {sim.score[1]}   t={sim.time:5.1f}s"
         scr.blit(self.font.render(hud, True, (220, 220, 220)), (12, 8))
+        if self.caption:
+            text = self.font.render(self.caption, True, (220, 220, 220))
+            scr.blit(text, (scr.get_width() - text.get_width() - 12, 8))
 
         if self.mode == "human":
             pg.display.flip()

@@ -3,13 +3,13 @@
 from gymnasium.envs.registration import register
 
 from .bot import scripted_action
-from .env import (ACTION_SPACE, AsteroidsBattleEnv, AsteroidsBattleParallelEnv, RewardConfig,
-                  decode_action)
+from .env import (ACTION_SPACE, TURN_LEVELS, AsteroidsBattleEnv, AsteroidsBattleParallelEnv,
+                  RewardConfig, decode_action)
 from .obs import ObsConfig
 from .sim import Config, Simulation
 
 __all__ = [
-    "ACTION_SPACE", "AsteroidsBattleEnv", "AsteroidsBattleParallelEnv", "Config", "ObsConfig",
+    "ACTION_SPACE", "TURN_LEVELS", "AsteroidsBattleEnv", "AsteroidsBattleParallelEnv", "Config", "ObsConfig",
     "RewardConfig", "Simulation", "decode_action", "scripted_action", "parallel_env",
 ]
 

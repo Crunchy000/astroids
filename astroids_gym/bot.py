@@ -9,6 +9,27 @@ from .sim import Ship, Simulation, wrap_angle
 Action = tuple[float, bool, bool]
 
 
+def lead(sim: Simulation, s: Ship, target: Ship) -> tuple[float, float, float, float]:
+    """Where to point to hit ``target`` with a bullet fired now.
+
+    Returns ``(world angle, bullet flight time, dx, dy)`` where (dx, dy) is the
+    wrap-aware offset from ``s`` to the target.
+    """
+    cfg = sim.cfg
+    dx, dy = sim.wdx(s.x, target.x), sim.wdy(s.y, target.y)
+    rvx, rvy = target.vx - s.vx, target.vy - s.vy
+    a = rvx * rvx + rvy * rvy - cfg.bullet_speed ** 2
+    b = 2 * (dx * rvx + dy * rvy)
+    c = dx * dx + dy * dy
+    t = 0.0
+    disc = b * b - 4 * a * c
+    if disc >= 0 and a != 0:
+        r = math.sqrt(disc)
+        roots = [x for x in ((-b - r) / (2 * a), (-b + r) / (2 * a)) if x > 0]
+        t = min(roots) if roots else 0.0
+    return math.atan2(dy + rvy * t, dx + rvx * t), t, dx, dy
+
+
 def scripted_action(sim: Simulation, s: Ship, horizon: int = 1) -> Action:
     """Chase the nearest enemy, lead shots, dodge bullets and asteroids.
 
@@ -33,20 +54,8 @@ def scripted_action(sim: Simulation, s: Ship, horizon: int = 1) -> Action:
     desired, thrust, fire = s.a, False, False
 
     if best is not None:
-        dx, dy = sim.wdx(s.x, best.x), sim.wdy(s.y, best.y)
+        aim, t, dx, dy = lead(sim, s, best)
         dist = math.hypot(dx, dy)
-        # Lead the target: intercept time for a bullet fired now.
-        rvx, rvy = best.vx - s.vx, best.vy - s.vy
-        a = rvx * rvx + rvy * rvy - cfg.bullet_speed ** 2
-        b = 2 * (dx * rvx + dy * rvy)
-        c = dx * dx + dy * dy
-        t = 0.0
-        disc = b * b - 4 * a * c
-        if disc >= 0 and a != 0:
-            r = math.sqrt(disc)
-            roots = [x for x in ((-b - r) / (2 * a), (-b + r) / (2 * a)) if x > 0]
-            t = min(roots) if roots else 0.0
-        aim = math.atan2(dy + rvy * t, dx + rvx * t)
         desired = aim
 
         err = abs(wrap_angle(aim - s.a))
