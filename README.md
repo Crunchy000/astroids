@@ -75,6 +75,23 @@ python examples/train_ppo.py --opponent-model models/ppo_pilot_best.zip --out mo
 
 Speed: the bare env runs about 2,800 agent steps/s per process (pure Python, nine scripted bots). With PPO in the loop, a 4-core machine manages about 900 steps/s end to end, so set `--n-envs` to your core count. The trainer keeps PyTorch to one thread (`--torch-threads`) so it doesn't starve the env workers.
 
+## Results: a PPO agent that beats the bot
+
+`results/ppo_pilot.zip` was trained with the default `train_ppo.py` settings on 4 CPU cores, about 1.5 hours and 3.5M steps. The aim bonus started at 0.01 and faded to zero by 4M steps. To confirm, it was then evaluated on 50 battles that training never saw, against the built-in bot flying the same seat in the same battles:
+
+| Blue seat 0 flown by | Avg reward | Kills | Deaths | Kills per death |
+|---|---|---|---|---|
+| **PPO agent** | **+2.03** | 6.1 | **5.2** | **1.16** |
+| Built-in bot | −1.17 | 7.3 | 8.1 | 0.90 |
+
+The agent wins mostly by staying alive: it dies about a third less often and still trades kills better than the bot. Training progress (20 battles per point):
+
+![Training progress](results/progress.png)
+
+Videos (60 s, same battle seed): [agent in seat 0](results/agent_seat0.mp4) · [bot in seat 0](results/bot_seat0.mp4) · [agent flying all of blue](results/agent_team.mp4).
+
+Limitation: when the same model flies all five blue ships, the team does about as well as an all-bot blue team (8 vs 10 wins out of 20 battles). The agent learned to be a strong individual among bot teammates, not to coordinate with copies of itself. Self-play (`--teammate-model`, `--opponent-model`) or the multi-agent env is the next step for that.
+
 ## Videos
 
 ```bash
