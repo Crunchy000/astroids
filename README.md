@@ -88,9 +88,9 @@ The agent wins mostly by staying alive: it dies about a third less often and sti
 
 ![Training progress](results/progress.png)
 
-Watch them on the website: https://crunchy000.github.io/astorids/videos.html (also linked from the game page). Videos (60 s with sound, same battle seed): [agent in seat 0](results/agent_seat0.mp4) · [bot in seat 0](results/bot_seat0.mp4) · [agent flying all of blue](results/agent_team.mp4).
+Watch them on the website: https://crunchy000.github.io/astorids/videos.html (also linked from the game page). Videos (60 s with sound, same battle seed): [agent in seat 0](results/agent_seat0.mp4) · [bot in seat 0](results/bot_seat0.mp4).
 
-Limitation: when the same model flies all five blue ships, the team does about as well as an all-bot blue team (8 vs 10 wins out of 20 battles). The agent learned to be a strong individual among bot teammates, not to coordinate with copies of itself. Self-play (`--teammate-model`, `--opponent-model`) or the multi-agent env is the next step for that.
+On its own this agent doesn't help a whole team: when it flies all five blue ships, the team does about as well as an all-bot blue team (8 vs 10 wins out of 20 battles). Team training (below) fixes that.
 
 ## Team training
 
@@ -99,6 +99,10 @@ python examples/train_team.py --init results/ppo_pilot.zip --n-workers 4
 ```
 
 One shared policy flies all five blue ships against the scripted red team (parameter sharing: each ship acts on its own observation, and all their experience trains the same network). Each worker process runs one battle, and every blue ship is one slot of the SB3 VecEnv. `--team-spirit 0.5` gives each ship half of its teammates' kill and death rewards, so ships care about the team result. Every `--eval-every` samples the team plays 40 fixed battles, scored by win rate and average kill margin against an all-bot blue team on the same battles. Progress goes to `<out>_eval.json` / `<out>_eval.png`, and the best model to `<out>_best.zip`.
+
+### Team results
+
+Starting from `results/ppo_pilot.zip`, `train_team.py` reached a 90% win rate (+9.8 average kill margin) over 40 evaluation battles after 2M ship-steps, in under 20 minutes on 4 cores. An all-bot blue team wins 50% (−0.8). The model is `results/ppo_team.zip`, with the progress chart `results/team_progress.png` and videos of the same battle: [team-trained blue wins 42–29](results/team_trained.mp4) · [all-bot blue loses 34–44](results/team_bots.mp4).
 
 ## Videos
 
