@@ -5,7 +5,7 @@
     python examples/record_video.py --model models/ppo_pilot.zip --team --out videos/team.mp4
     python examples/record_video.py --out videos/bot.mp4          # the built-in bot, for comparison
 
-Default: the pilot flies blue seat 0 (circled) with scripted teammates and enemies.
+Default: the pilot flies blue ship 0 with scripted teammates and enemies.
 ``--team``: the pilot flies all five blue ships against the scripted red team.
 """
 
@@ -26,6 +26,7 @@ def main():
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--team", action="store_true", help="pilot flies the whole blue team")
     p.add_argument("--caption", help="text in the top-right corner (default: who is flying)")
+    p.add_argument("--no-sound", action="store_true", help="skip the synthesised soundtrack")
     args = p.parse_args()
 
     if args.model:
@@ -56,7 +57,7 @@ def main():
     else:
         env = AsteroidsBattleEnv(render_mode="rgb_array", max_steps=steps)
         obs, _ = env.reset(seed=args.seed)
-        caption = args.caption or f"CIRCLED: {who}"
+        caption = args.caption or f"BLUE SHIP 0: {who}"
 
         def advance():
             nonlocal obs
@@ -64,15 +65,40 @@ def main():
 
     env.render()  # creates the renderer
     env._renderer.caption = caption
+    env.sim.sfx = None if args.no_sound else []  # log shots, hits, explosions for the soundtrack
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
-    with imageio.get_writer(args.out, fps=env.metadata["render_fps"], codec="libx264",
+    silent = args.out if args.no_sound else args.out + ".silent.mp4"
+    with imageio.get_writer(silent, fps=env.metadata["render_fps"], codec="libx264",
                             quality=7, macro_block_size=8) as writer:
         writer.append_data(env.render())
         for _ in range(steps):
             advance()
             writer.append_data(env.render())
+    if not args.no_sound:
+        add_soundtrack(silent, args.out, env.sim.sfx, env.sim.time, env.sim.cfg.width)
     print(f"wrote {args.out}  final score BLUE {env.sim.score[0]} - RED {env.sim.score[1]}")
     env.close()
+
+
+def add_soundtrack(silent_mp4, out_mp4, events, duration, width):
+    """Synthesise the battle's sound effects and mux them into the video (AAC)."""
+    import subprocess
+    import tempfile
+
+    import imageio_ffmpeg
+
+    from astroids_gym.audio import render_soundtrack, write_wav
+
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+        wav = f.name
+    try:
+        write_wav(wav, render_soundtrack(events, duration, width))
+        subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error",
+                        "-i", silent_mp4, "-i", wav, "-c:v", "copy", "-c:a", "aac", "-b:a", "128k",
+                        "-shortest", out_mp4], check=True)
+    finally:
+        os.remove(wav)
+        os.remove(silent_mp4)
 
 
 if __name__ == "__main__":

@@ -35,15 +35,17 @@ def plot(json_path, png_path=None, aim_anneal=None):
     png_path = png_path or os.path.splitext(json_path)[0] + ".png"
     x = [h["timesteps"] / 1e6 for h in hist]
 
-    panels = [("return", "Average reward per battle", "{:+.2f}"),
-              ("kd", "Kills per death", "{:.2f}")]
+    panels = [(m["key"], m["title"], m["fmt"]) for m in data.get("metrics", [])] or [
+        ("return", "Average reward per battle", "{:+.2f}"), ("kd", "Kills per death", "{:.2f}")]
+    bot_label = data.get("bot_label", "Built-in bot (same seat)")
+    agent_label = data.get("agent_label", "PPO agent")
     fig, axes = plt.subplots(2, 1, figsize=(8, 6.4), sharex=True, facecolor=SURFACE)
     for ax, (key, title, fmt) in zip(axes, panels):
         y = [h[key] for h in hist]
         ax.set_facecolor(SURFACE)
-        ax.axhline(bot[key], color=BOT, lw=1.5, ls=(0, (5, 4)), zorder=2, label="Built-in bot (same seat)")
+        ax.axhline(bot[key], color=BOT, lw=1.5, ls=(0, (5, 4)), zorder=2, label=bot_label)
         ax.plot(x, y, color=PILOT, lw=2, marker="o", ms=7, mec=SURFACE, mew=2, zorder=3,
-                label="PPO agent")
+                label=agent_label)
         # Direct labels: latest agent value and the bot's line.
         ax.annotate(fmt.format(y[-1]), (x[-1], y[-1]), xytext=(8, 0), textcoords="offset points",
                     va="center", color=TEXT, fontsize=10, fontweight="bold",
@@ -66,10 +68,10 @@ def plot(json_path, png_path=None, aim_anneal=None):
         axes[0].annotate("aim bonus fading out", (aim_anneal / 1e6 / 2, 1), xycoords=("data", "axes fraction"),
                          xytext=(0, -4), textcoords="offset points", ha="center", va="top",
                          color=TEXT_2, fontsize=9)
-    axes[1].set_xlabel("Training steps (millions)", color=TEXT_2, fontsize=10)
-    axes[1].set_xlim(0, max(max(x), (aim_anneal or 0) / 1e6) * 1.1)
+    axes[1].set_xlabel(data.get("xlabel", "Training steps (millions)"), color=TEXT_2, fontsize=10)
+    axes[1].set_xlim(0, max(max(x), (aim_anneal or 0) / 1e6, 0.1) * 1.1)
     axes[0].legend(loc="lower right", frameon=False, fontsize=9, labelcolor=TEXT)
-    fig.suptitle("PPO agent vs built-in bot, blue seat 0 (20 battles per point)",
+    fig.suptitle(data.get("title", "PPO agent vs built-in bot, blue seat 0 (20 battles per point)"),
                  x=0.02, ha="left", color=TEXT_2, fontsize=10)
     fig.tight_layout()
     fig.savefig(png_path, dpi=150, facecolor=SURFACE)

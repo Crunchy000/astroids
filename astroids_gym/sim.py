@@ -101,6 +101,8 @@ class Simulation:
         self._w, self._h = self.cfg.width, self.cfg.height
         self._hw, self._hh = self._w / 2, self._h / 2
         self.rng = np.random.default_rng(seed)
+        # Set to a list to log sound events as (time, kind, x, detail); used for video audio.
+        self.sfx: list | None = None
         self.reset(seed)
 
     # ---- helpers -------------------------------------------------------
@@ -183,12 +185,16 @@ class Simulation:
             ev.hits_dealt[attacker.id] += 1
         if s.hp <= 0:
             self._kill(s, attacker, ev)
+        elif self.sfx is not None:
+            self.sfx.append((self.time, "hit", s.x, s.team))
 
     def _kill(self, s: Ship, attacker: Ship | None, ev: Events) -> None:
         s.alive = False
         s.respawn = self.cfg.respawn_time
         s.deaths += 1
         ev.deaths[s.id] += 1
+        if self.sfx is not None:
+            self.sfx.append((self.time, "boom", s.x, s.team))
         if attacker is not None and attacker.team != s.team:
             self.score[attacker.team] += 1
             attacker.kills += 1
@@ -196,6 +202,8 @@ class Simulation:
 
     def _break_asteroid(self, idx: int) -> None:
         a = self.asteroids.pop(idx)
+        if self.sfx is not None:
+            self.sfx.append((self.time, "rock", a.x, a.size))
         if a.size > 1:
             for _ in range(2):
                 self.asteroids.append(self._make_asteroid(a.x, a.y, a.size - 1))
@@ -248,6 +256,8 @@ class Simulation:
                     cfg.bullet_life, s.team, s,
                 ))
                 ev.shots[s.id] += 1
+                if self.sfx is not None:
+                    self.sfx.append((self.time, "shot", s.x, s.team))
 
         self._ship_collisions(ev)
         self._bullets(ev)

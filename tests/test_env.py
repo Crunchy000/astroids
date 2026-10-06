@@ -127,3 +127,18 @@ def test_step_none_lets_the_bot_fly():
         *_, term, trunc, info = env.step(None)
         done = term or trunc
     assert info["kills"] > 0
+
+
+def test_sound_events_and_soundtrack():
+    from astroids_gym.audio import RATE, render_soundtrack
+    from astroids_gym.bot import scripted_action
+
+    sim = Simulation(Config(), seed=0)
+    sim.sfx = []
+    for _ in range(60 * 20):
+        sim.step({s.id: scripted_action(sim, s) for s in sim.ships})
+    kinds = {e[1] for e in sim.sfx}
+    assert {"shot", "boom"} <= kinds
+    track = render_soundtrack(sim.sfx, sim.time)
+    assert track.shape == (int(sim.time * RATE), 2)
+    assert 0 < np.abs(track).max() <= 0.8 + 1e-6

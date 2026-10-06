@@ -136,14 +136,14 @@ class _Match:
         self._steps += 1
         return total
 
-    def render(self, highlight: set[int] | None = None):
+    def render(self):
         if self.render_mode is None:
             gym.logger.warn("render() called without a render_mode")
             return None
         if self._renderer is None:
             from .render import Renderer
             self._renderer = Renderer(self.sim, self.render_mode, self.metadata["render_fps"])
-        return self._renderer.draw(highlight)
+        return self._renderer.draw()
 
     def close(self):
         if self._renderer is not None:
@@ -205,9 +205,6 @@ class AsteroidsBattleEnv(_Match, gym.Env):
         """Change ``RewardConfig`` fields mid-training (e.g. anneal ``aim``) via ``env_method``."""
         for k, v in weights.items():
             setattr(self.reward_cfg, k, v)
-
-    def render(self):
-        return super().render({self.controlled})
 
     def _info(self) -> dict:
         me = self.sim.ships[self.controlled]
@@ -284,9 +281,6 @@ class AsteroidsBattleParallelEnv(_Match, _ParallelBase):
         if self.render_mode == "human":
             self.render()
         return obs, rew, term, trunc, infos
-
-    def render(self):
-        return super().render(set(self._ids.values()))
 
     def state(self) -> np.ndarray:
         """Global state: every ship's (alive, x, y, vx, vy, sin a, cos a, hp), normalised."""

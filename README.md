@@ -2,7 +2,7 @@
 
 Two fleets of five triangle ships fight it out in an Asteroids-style arena.
 
-- **Watch it in the browser:** https://crunchy000.github.io/astorids/ (`index.html`, scripted AI on both sides)
+- **Watch it in the browser:** https://crunchy000.github.io/astorids/ (`index.html`, scripted AI on both sides). It has synthesised sound effects (lasers, hits, explosions, asteroid thuds, panned by position): press any key to start audio, and M to mute.
 - **Train agents in Python:** `astroids_gym`, a [Gymnasium](https://gymnasium.farama.org/) (the maintained successor to OpenAI Gym) and [PettingZoo](https://pettingzoo.farama.org/) port of the same game.
 
 ## Install
@@ -88,19 +88,27 @@ The agent wins mostly by staying alive: it dies about a third less often and sti
 
 ![Training progress](results/progress.png)
 
-Videos (60 s, same battle seed): [agent in seat 0](results/agent_seat0.mp4) · [bot in seat 0](results/bot_seat0.mp4) · [agent flying all of blue](results/agent_team.mp4).
+Videos (60 s, same battle seed, recorded before the soundtrack was added): [agent in seat 0](results/agent_seat0.mp4) · [bot in seat 0](results/bot_seat0.mp4) · [agent flying all of blue](results/agent_team.mp4).
 
 Limitation: when the same model flies all five blue ships, the team does about as well as an all-bot blue team (8 vs 10 wins out of 20 battles). The agent learned to be a strong individual among bot teammates, not to coordinate with copies of itself. Self-play (`--teammate-model`, `--opponent-model`) or the multi-agent env is the next step for that.
+
+## Team training
+
+```bash
+python examples/train_team.py --init results/ppo_pilot.zip --n-workers 4
+```
+
+One shared policy flies all five blue ships against the scripted red team (parameter sharing: each ship acts on its own observation, and all their experience trains the same network). Each worker process runs one battle, and every blue ship is one slot of the SB3 VecEnv. `--team-spirit 0.5` gives each ship half of its teammates' kill and death rewards, so ships care about the team result. Every `--eval-every` samples the team plays 40 fixed battles, scored by win rate and average kill margin against an all-bot blue team on the same battles. Progress goes to `<out>_eval.json` / `<out>_eval.png`, and the best model to `<out>_best.zip`.
 
 ## Videos
 
 ```bash
-python examples/record_video.py --model models/ppo_pilot_best.zip --out videos/pilot.mp4         # pilot in seat 0 (circled)
+python examples/record_video.py --model models/ppo_pilot_best.zip --out videos/pilot.mp4         # pilot flies blue ship 0
 python examples/record_video.py --model models/ppo_pilot_best.zip --team --out videos/team.mp4   # pilot flies all of blue
 python examples/record_video.py --out videos/bot.mp4                                             # built-in bot, for comparison
 ```
 
-`--seconds` sets the length (default 60) and `--seed` picks the battle. Videos are 1280×720 at 30 fps. Inside your own code, `render_mode="rgb_array"` returns frames from either env.
+`--seconds` sets the length (default 60) and `--seed` picks the battle. Videos are 1280×720 at 30 fps with a synthesised stereo soundtrack matching the browser game's sound effects (`--no-sound` to skip it; the synth is in `astroids_gym/audio.py`). Inside your own code, `render_mode="rgb_array"` returns frames from either env.
 
 ## Tests
 

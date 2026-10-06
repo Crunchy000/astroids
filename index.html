@@ -26,7 +26,7 @@
   <div id="status"></div>
   <div class="red">alive <span id="ar">5</span> &nbsp;·&nbsp; <span id="sr">0</span> RED</div>
 </div>
-<div id="help">Space pause · R restart · 1/2/3 speed · A toggle asteroids · D debug</div>
+<div id="help">Space pause · R restart · 1/2/3 speed · M sound · A toggle asteroids · D debug</div>
 
 <script>
 (() => {
@@ -230,8 +230,97 @@
         vx: s.vx + cx * BULLET_SPEED, vy: s.vy + cy * BULLET_SPEED,
         life: BULLET_LIFE, team: s.team, owner: s,
       });
+      sound.shot(s.x, s.team);
     }
   }
+
+  // ---- sound (synthesised with Web Audio; no files) ----
+  const sound = (() => {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    let ctx = null, master = null, noise = null, on = true;
+    const lastPlayed = {};          // per-kind throttle so a 5v5 firefight stays listenable
+    const MIN_GAP = { shot: 0.035, hit: 0.05, boom: 0.06, rock: 0.07 };
+
+    function init() {
+      if (ctx || !AC) return;
+      ctx = new AC();
+      master = ctx.createGain();
+      master.gain.value = 0.35;
+      master.connect(ctx.destination);
+      noise = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+      const d = noise.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    }
+    function unlock() { init(); if (ctx && ctx.state === 'suspended') ctx.resume(); }
+
+    // Gain envelope -> stereo pan by screen x -> master.
+    function voice(x, peak, attack, decay) {
+      const t = ctx.currentTime;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(peak, t + attack);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + attack + decay);
+      let out = g;
+      if (ctx.createStereoPanner) {
+        const p = ctx.createStereoPanner();
+        p.pan.value = Math.max(-1, Math.min(1, (x / W) * 1.6 - 0.8));
+        g.connect(p); out = p;
+      }
+      out.connect(master);
+      return { g, t, end: t + attack + decay + 0.02 };
+    }
+    function ready(kind) {
+      if (!on || !ctx || ctx.state !== 'running' || paused) return false;
+      const t = ctx.currentTime;
+      if (t - (lastPlayed[kind] || 0) < MIN_GAP[kind] / Math.sqrt(speed)) return false;
+      lastPlayed[kind] = t;
+      return true;
+    }
+    function tone(x, type, f0, f1, peak, decay) {
+      const v = voice(x, peak, 0.004, decay);
+      const o = ctx.createOscillator();
+      o.type = type;
+      o.frequency.setValueAtTime(f0, v.t);
+      o.frequency.exponentialRampToValueAtTime(f1, v.end);
+      o.connect(v.g); o.start(v.t); o.stop(v.end);
+    }
+    function hiss(x, filterType, f0, f1, q, peak, attack, decay) {
+      const v = voice(x, peak, attack, decay);
+      const src = ctx.createBufferSource();
+      src.buffer = noise;
+      const f = ctx.createBiquadFilter();
+      f.type = filterType; f.Q.value = q;
+      f.frequency.setValueAtTime(f0, v.t);
+      f.frequency.exponentialRampToValueAtTime(f1, v.end);
+      src.connect(f); f.connect(v.g);
+      src.start(v.t, Math.random() * 0.5); src.stop(v.end);
+    }
+
+    return {
+      unlock,
+      get on() { return on; },
+      get needsGesture() { return on && (!ctx || ctx.state !== 'running'); },
+      toggle() { on = !on; if (on) unlock(); },
+      shot(x, team) {   // laser "pew": blue a little higher than red
+        if (!ready('shot')) return;
+        const f = team === 0 ? 1350 : 950;
+        tone(x, 'square', f * rand(0.95, 1.05), f * 0.3, 0.05, 0.11);
+      },
+      hit(x) {          // non-fatal hit: short bright crack
+        if (!ready('hit')) return;
+        hiss(x, 'bandpass', 3200, 900, 1.2, 0.35, 0.002, 0.09);
+      },
+      boom(x) {         // ship destroyed: low rumbling noise + sub drop
+        if (!ready('boom')) return;
+        hiss(x, 'lowpass', 1800, 90, 0.7, 0.9, 0.005, 0.9);
+        tone(x, 'sine', 140, 35, 0.5, 0.6);
+      },
+      rock(x, size) {   // asteroid breaks: dull thud, deeper for big rocks
+        if (!ready('rock')) return;
+        hiss(x, 'lowpass', 500 / size + 250, 60, 0.9, 0.25 + 0.1 * size, 0.004, 0.25 + 0.1 * size);
+      },
+    };
+  })();
 
   // ---- simulation ----
   function hitShip(s, attacker) {
@@ -239,18 +328,21 @@
     s.hp--;
     burst(s.x, s.y, TEAMS[s.team].color, 6, 90);
     if (s.hp <= 0) killShip(s, attacker);
+    else sound.hit(s.x);
   }
 
   function killShip(s, attacker) {
     s.alive = false; s.respawn = RESPAWN_TIME; s.deaths++;
     burst(s.x, s.y, TEAMS[s.team].color, 40, 220);
     burst(s.x, s.y, '#fff', 15, 140);
+    sound.boom(s.x);
     if (attacker && attacker.team !== s.team) { score[attacker.team]++; attacker.kills++; }
   }
 
   function breakAsteroid(as, i) {
     asteroids.splice(i, 1);
     burst(as.x, as.y, '#9aa', 12 * as.size, 120);
+    sound.rock(as.x, as.size);
     if (as.size > 1) {
       for (let k = 0; k < 2; k++) asteroids.push(makeAsteroid(as.x, as.y, as.size - 1));
     }
@@ -470,12 +562,20 @@
     $('sb').textContent = score[0]; $('sr').textContent = score[1];
     $('ab').textContent = ships.filter(s => s.team === 0 && s.alive).length;
     $('ar').textContent = ships.filter(s => s.team === 1 && s.alive).length;
-    $('status').textContent = (speed !== 1 ? `${speed}x ` : '') + (asteroidsOn ? '' : 'no asteroids');
+    $('status').textContent = [
+      speed !== 1 ? `${speed}x` : '',
+      asteroidsOn ? '' : 'no asteroids',
+      !sound.on ? 'muted' : sound.needsGesture ? 'press any key for sound' : '',
+    ].filter(Boolean).join(' · ');
   }
 
   // ---- input ----
+  // Browsers only start audio after a user gesture.
+  window.addEventListener('pointerdown', () => sound.unlock());
   window.addEventListener('keydown', e => {
+    if (e.key !== 'm' && e.key !== 'M') sound.unlock();
     if (e.code === 'Space') { paused = !paused; e.preventDefault(); }
+    else if (e.key === 'm' || e.key === 'M') sound.toggle();
     else if (e.key === 'r' || e.key === 'R') reset();
     else if (e.key === '1') speed = 1;
     else if (e.key === '2') speed = 2;

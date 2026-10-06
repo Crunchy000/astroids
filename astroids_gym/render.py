@@ -50,7 +50,7 @@ class Renderer:
         elif y > h - r: ys.append(y - h)
         return [(px, py) for px in xs for py in ys]
 
-    def draw(self, highlight: set[int] | None = None):
+    def draw(self):
         pg, sim, scr = self.pg, self.sim, self.screen
         if self.mode == "human":
             for event in pg.event.get():
@@ -88,8 +88,6 @@ class Renderer:
                     flame = [(-r * 0.7, r * 0.35), (-r * 1.6, 0), (-r * 0.7, -r * 0.35)]
                     pg.draw.lines(scr, FLAME, False,
                                   [(gx + px * ca - py * sa, gy + px * sa + py * ca) for px, py in flame], 2)
-                if highlight and s.id in highlight:
-                    pg.draw.circle(scr, (255, 255, 255), (int(gx), int(gy)), int(r * 2), 1)
                 for k in range(s.hp):
                     pg.draw.rect(scr, color, (gx - 7 + k * 5, gy + r + 6, 3, 3))
 
