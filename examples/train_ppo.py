@@ -7,8 +7,9 @@ Aim shaping (``--aim``) pays a small bonus each step for pointing where a shot
 would hit the nearest enemy. It fades linearly to zero over ``--aim-anneal``
 steps, so the finished pilot is optimised for the real game reward. Every
 ``--eval-every`` steps the pilot and the built-in bot each fly blue seat 0 on the
-same seeds; the best model is kept and ``--stop-when-beats`` ends training once
-the pilot out-scores the bot.
+same seeds. The best model is kept, the history goes to ``<out>_eval.json``
+(charted to ``<out>_eval.png`` when matplotlib is installed), and
+``--stop-when-beats`` ends training once the pilot out-scores the bot.
 
 Self-play: pit a new learner against frozen copies of an earlier model
 (red team, and optionally blue teammates):
@@ -30,6 +31,7 @@ from stable_baselines3.common.vec_env import SubprocVecEnv
 import astroids_gym  # noqa: F401  (registers AsteroidsBattle-v0)
 from astroids_gym import RewardConfig
 from evaluate import evaluate, fmt
+from plot_progress import plot
 
 
 class FrozenPolicy:
@@ -71,9 +73,10 @@ class AimAnneal(BaseCallback):
 class BeatTheBot(BaseCallback):
     """Periodically compare the pilot with the bot in the same seat; keep the best model."""
 
-    def __init__(self, every, episodes, out, stop_when_beats):
+    def __init__(self, every, episodes, out, stop_when_beats, aim_anneal=None):
         super().__init__()
         self.every, self.episodes, self.out, self.stop = every, episodes, out, stop_when_beats
+        self.aim_anneal = aim_anneal
         self.next_eval, self.best = every, -float("inf")
         print("evaluating the built-in bot in blue seat 0 ...")
         self.bot = evaluate(lambda obs: None, episodes)
@@ -91,7 +94,10 @@ class BeatTheBot(BaseCallback):
             self.logger.record(f"eval/{k}", v)
         self.history.append({"timesteps": self.num_timesteps, **stats})
         with open(f"{self.out}_eval.json", "w") as f:
-            json.dump({"bot": self.bot, "history": self.history}, f, indent=1)
+            json.dump({"bot": self.bot, "aim_anneal": self.aim_anneal, "history": self.history},
+                      f, indent=1)
+        if importlib.util.find_spec("matplotlib"):
+            plot(f"{self.out}_eval.json")  # refresh <out>_eval.png
         if stats["return"] > self.best:
             self.best = stats["return"]
             self.model.save(f"{self.out}_best")
@@ -138,7 +144,8 @@ def main():
             policy_kwargs={"net_arch": [256, 256]}, seed=args.seed, verbose=0,
             tensorboard_log="runs" if importlib.util.find_spec("tensorboard") else None,
         )
-    callbacks = [BeatTheBot(args.eval_every, args.eval_episodes, args.out, args.stop_when_beats)]
+    callbacks = [BeatTheBot(args.eval_every, args.eval_episodes, args.out, args.stop_when_beats,
+                            args.aim_anneal if args.aim else None)]
     if args.aim:
         callbacks.append(AimAnneal(args.aim, args.aim_anneal))
     model.learn(total_timesteps=args.timesteps, callback=callbacks,

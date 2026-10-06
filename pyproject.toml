@@ -14,7 +14,7 @@ dependencies = ["gymnasium>=0.29", "numpy>=1.24"]
 render = ["pygame>=2.5"]
 video = ["pygame>=2.5", "imageio[ffmpeg]>=2.30"]
 multiagent = ["pettingzoo>=1.24"]
-train = ["stable-baselines3>=2.3", "torch", "tensorboard"]
+train = ["stable-baselines3>=2.3", "torch", "tensorboard", "matplotlib"]
 dev = ["pytest", "pygame>=2.5", "pettingzoo>=1.24"]
 
 [tool.setuptools]
