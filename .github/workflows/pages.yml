@@ -22,8 +22,9 @@ jobs:
       - uses: actions/configure-pages@v5
       - name: Build site
         run: |
-          mkdir -p _site
-          cp index.html _site/
+          mkdir -p _site/results
+          cp index.html videos.html _site/
+          cp results/videos.json results/*.mp4 results/*.png results/*.jpg _site/results/
           touch _site/.nojekyll
       - uses: actions/upload-pages-artifact@v3
         with:

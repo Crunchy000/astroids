@@ -1,0 +1,59 @@
+{
+  "sections": [
+    {
+      "id": "single",
+      "title": "One trained agent among bots",
+      "summary": "A PPO agent flies blue ship 0; the other nine ships are the built-in bot. After 3.5M training steps it beats the bot playing the same seat, on 50 battles it never trained on.",
+      "table": {
+        "columns": [
+          "Blue ship 0 flown by",
+          "Avg reward",
+          "Kills",
+          "Deaths",
+          "Kills per death"
+        ],
+        "rows": [
+          [
+            "PPO agent",
+            "+2.03",
+            "6.1",
+            "5.2",
+            "1.16"
+          ],
+          [
+            "Built-in bot",
+            "−1.17",
+            "7.3",
+            "8.1",
+            "0.90"
+          ]
+        ],
+        "highlight": 0
+      },
+      "chart": {
+        "src": "results/progress.png",
+        "alt": "Training progress: the agent's average reward and kills per death rise past the bot's between 3M and 3.5M steps."
+      },
+      "videos": [
+        {
+          "src": "results/agent_seat0.mp4",
+          "title": "Agent in blue ship 0",
+          "note": "Same battle as the next clip. Blue wins 33–31.",
+          "poster": "results/agent_seat0.jpg"
+        },
+        {
+          "src": "results/bot_seat0.mp4",
+          "title": "Bot in blue ship 0",
+          "note": "Same battle, the bot in that seat. Blue loses 34–44.",
+          "poster": "results/bot_seat0.jpg"
+        },
+        {
+          "src": "results/agent_team.mp4",
+          "title": "Single-seat agent flying all of blue",
+          "note": "Before team training: it plays as well as the bots, not better (8 vs 10 wins in 20 battles).",
+          "poster": "results/agent_team.jpg"
+        }
+      ]
+    }
+  ]
+}

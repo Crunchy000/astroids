@@ -17,6 +17,11 @@
     position: fixed; bottom: 8px; left: 0; right: 0; text-align: center; color: #667;
     font: 12px ui-monospace, Menlo, Consolas, monospace; pointer-events: none;
   }
+  #agents {
+    position: fixed; bottom: 6px; right: 12px; color: #4cc9f0; text-decoration: none;
+    font: 12px ui-monospace, Menlo, Consolas, monospace; padding: 2px 4px;
+  }
+  #agents:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
@@ -26,6 +31,7 @@
   <div id="status"></div>
   <div class="red">alive <span id="ar">5</span> &nbsp;·&nbsp; <span id="sr">0</span> RED</div>
 </div>
+<a id="agents" href="videos.html">Trained agents &amp; videos &rarr;</a>
 <div id="help">Space pause · R restart · 1/2/3 speed · M sound · A toggle asteroids · D debug</div>
 
 <script>

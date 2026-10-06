@@ -88,7 +88,7 @@ The agent wins mostly by staying alive: it dies about a third less often and sti
 
 ![Training progress](results/progress.png)
 
-Videos (60 s, same battle seed, recorded before the soundtrack was added): [agent in seat 0](results/agent_seat0.mp4) · [bot in seat 0](results/bot_seat0.mp4) · [agent flying all of blue](results/agent_team.mp4).
+Watch them on the website: https://crunchy000.github.io/astorids/videos.html (also linked from the game page). Videos (60 s with sound, same battle seed): [agent in seat 0](results/agent_seat0.mp4) · [bot in seat 0](results/bot_seat0.mp4) · [agent flying all of blue](results/agent_team.mp4).
 
 Limitation: when the same model flies all five blue ships, the team does about as well as an all-bot blue team (8 vs 10 wins out of 20 battles). The agent learned to be a strong individual among bot teammates, not to coordinate with copies of itself. Self-play (`--teammate-model`, `--opponent-model`) or the multi-agent env is the next step for that.
 
