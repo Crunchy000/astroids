@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Asteroids 5v5</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #05060a; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  #hud {
+    position: fixed; top: 0; left: 0; right: 0; display: flex; justify-content: space-between;
+    padding: 10px 16px; font: 600 16px/1.2 ui-monospace, Menlo, Consolas, monospace; color: #ddd;
+    pointer-events: none; text-shadow: 0 0 6px #000;
+  }
+  #hud .blue { color: #4cc9f0; } #hud .red { color: #ff7b54; }
+  #help {
+    position: fixed; bottom: 8px; left: 0; right: 0; text-align: center; color: #667;
+    font: 12px ui-monospace, Menlo, Consolas, monospace; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">
+  <div class="blue">BLUE <span id="sb">0</span> &nbsp;·&nbsp; alive <span id="ab">5</span></div>
+  <div id="status"></div>
+  <div class="red">alive <span id="ar">5</span> &nbsp;·&nbsp; <span id="sr">0</span> RED</div>
+</div>
+<div id="help">Space pause · R restart · 1/2/3 speed · A toggle asteroids · D debug</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  let W = 0, H = 0, DPR = 1;
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = W * DPR; canvas.height = H * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ---- tuning ----
+  const TEAM_SIZE = 5;
+  const SHIP_R = 11;
+  const SHIP_HP = 3;
+  const TURN_RATE = 4.2;        // rad/s
+  const THRUST = 220;           // px/s^2
+  const MAX_SPEED = 260;
+  const DRAG = 0.35;            // per second
+  const BULLET_SPEED = 480;
+  const BULLET_LIFE = 1.3;
+  const FIRE_COOLDOWN = 0.32;
+  const RESPAWN_TIME = 3;
+  const ASTEROID_COUNT = 7;
+  const TEAMS = [
+    { name: 'BLUE', color: '#4cc9f0', glow: 'rgba(76,201,240,0.6)' },
+    { name: 'RED',  color: '#ff7b54', glow: 'rgba(255,123,84,0.6)' },
+  ];
+
+  const TAU = Math.PI * 2;
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const wrapAngle = a => { while (a > Math.PI) a -= TAU; while (a < -Math.PI) a += TAU; return a; };
+  // Shortest delta on a wrapping (toroidal) world.
+  function wdx(a, b) { let d = b - a; if (d > W / 2) d -= W; else if (d < -W / 2) d += W; return d; }
+  function wdy(a, b) { let d = b - a; if (d > H / 2) d -= H; else if (d < -H / 2) d += H; return d; }
+  function wrapPos(o) {
+    if (o.x < 0) o.x += W; else if (o.x >= W) o.x -= W;
+    if (o.y < 0) o.y += H; else if (o.y >= H) o.y -= H;
+  }
+
+  let ships, bullets, asteroids, particles, stars, score, paused, speed, asteroidsOn, debug, winnerFlash;
+
+  function spawnPoint(team) {
+    const x = team === 0 ? rand(W * 0.05, W * 0.2) : rand(W * 0.8, W * 0.95);
+    return { x, y: rand(H * 0.15, H * 0.85) };
+  }
+
+  function makeShip(team, i) {
+    const s = { team, id: team * 100 + i, alive: true, respawn: 0, kills: 0, deaths: 0 };
+    resetShip(s);
+    return s;
+  }
+
+  function resetShip(s) {
+    const p = spawnPoint(s.team);
+    s.x = p.x; s.y = p.y; s.vx = 0; s.vy = 0;
+    s.a = s.team === 0 ? 0 : Math.PI;
+    s.hp = SHIP_HP; s.cool = rand(0, FIRE_COOLDOWN);
+    s.alive = true; s.thrusting = false; s.target = null; s.invuln = 1.5;
+    s.wander = rand(-1, 1);
+    // A little personality so the fleets don't move in lockstep.
+    s.aggro = rand(0.6, 1.0);
+    s.prefDist = rand(140, 260);
+  }
+
+  function makeAsteroid(x, y, size) {
+    const r = size * 16;
+    const n = 9 + Math.floor(Math.random() * 4);
+    const shape = [];
+    for (let i = 0; i < n; i++) shape.push(rand(0.72, 1.15));
+    const sp = rand(20, 60) / size;
+    const dir = rand(0, TAU);
+    return { x, y, vx: Math.cos(dir) * sp, vy: Math.sin(dir) * sp, r, size, a: rand(0, TAU), spin: rand(-0.8, 0.8), shape, hp: size };
+  }
+
+  function spawnAsteroids() {
+    asteroids = [];
+    if (!asteroidsOn) return;
+    for (let i = 0; i < ASTEROID_COUNT; i++) {
+      // keep them toward the middle so spawns are safe
+      asteroids.push(makeAsteroid(rand(W * 0.3, W * 0.7), rand(0, H), Math.random() < 0.5 ? 3 : 2));
+    }
+  }
+
+  function reset() {
+    ships = [];
+    for (let t = 0; t < 2; t++) for (let i = 0; i < TEAM_SIZE; i++) ships.push(makeShip(t, i));
+    bullets = []; particles = [];
+    score = [0, 0];
+    winnerFlash = 0;
+    spawnAsteroids();
+    stars = [];
+    for (let i = 0; i < 160; i++) stars.push({ x: Math.random(), y: Math.random(), b: Math.random() });
+  }
+
+  paused = false; speed = 1; asteroidsOn = true; debug = false;
+  reset();
+
+  // ---- effects ----
+  function burst(x, y, color, n, spd) {
+    for (let i = 0; i < n; i++) {
+      const d = rand(0, TAU), v = rand(0.2, 1) * spd;
+      particles.push({ x, y, vx: Math.cos(d) * v, vy: Math.sin(d) * v, life: rand(0.4, 1.1), max: 1.1, color });
+    }
+  }
+
+  // ---- AI ----
+  function steer(s, dt) {
+    // Pick nearest enemy (wrap-aware), with mild stickiness.
+    let best = null, bestD = Infinity;
+    for (const o of ships) {
+      if (!o.alive || o.team === s.team) continue;
+      const dx = wdx(s.x, o.x), dy = wdy(s.y, o.y);
+      let d = Math.hypot(dx, dy);
+      if (o === s.target) d *= 0.8;
+      if (d < bestD) { bestD = d; best = o; }
+    }
+    s.target = best;
+
+    let desired = s.a, thrust = false, fire = false;
+
+    if (best) {
+      const dx = wdx(s.x, best.x), dy = wdy(s.y, best.y);
+      const dist = Math.hypot(dx, dy);
+      // Lead the target: solve for intercept time with relative velocity.
+      const rvx = best.vx - s.vx, rvy = best.vy - s.vy;
+      const a = rvx * rvx + rvy * rvy - BULLET_SPEED * BULLET_SPEED;
+      const b = 2 * (dx * rvx + dy * rvy);
+      const c = dx * dx + dy * dy;
+      let t = 0;
+      const disc = b * b - 4 * a * c;
+      if (disc >= 0 && a !== 0) {
+        const t1 = (-b - Math.sqrt(disc)) / (2 * a), t2 = (-b + Math.sqrt(disc)) / (2 * a);
+        t = Math.max(t1, t2) > 0 ? (t1 > 0 && t2 > 0 ? Math.min(t1, t2) : Math.max(t1, t2)) : 0;
+      }
+      const aimX = dx + rvx * t, aimY = dy + rvy * t;
+      const aimAng = Math.atan2(aimY, aimX);
+      desired = aimAng;
+
+      const err = Math.abs(wrapAngle(aimAng - s.a));
+      if (err < 0.12 && dist < BULLET_SPEED * BULLET_LIFE * 0.9 && t < BULLET_LIFE) fire = true;
+
+      // Close in if far, back off / strafe if too close.
+      const facing = Math.abs(wrapAngle(Math.atan2(dy, dx) - s.a)) < 0.6;
+      if (dist > s.prefDist && facing && Math.random() < s.aggro) thrust = true;
+      if (dist < s.prefDist * 0.5) {
+        // turn away-ish to break off, then come back around
+        desired = Math.atan2(dy, dx) + Math.PI * 0.6 * Math.sign(s.wander || 1);
+        thrust = Math.abs(wrapAngle(desired - s.a)) < 0.8;
+      }
+    } else {
+      s.wander += rand(-1, 1) * dt;
+      desired = s.a + s.wander;
+    }
+
+    // Dodge: nearby enemy bullets and asteroids on collision course.
+    let avoidX = 0, avoidY = 0, threat = 0;
+    for (const bl of bullets) {
+      if (bl.team === s.team) continue;
+      const dx = wdx(bl.x, s.x), dy = wdy(bl.y, s.y);
+      const d2 = dx * dx + dy * dy;
+      if (d2 > 140 * 140) continue;
+      // is it heading toward us?
+      if (dx * bl.vx + dy * bl.vy <= 0) continue;
+      // perpendicular escape direction
+      const sgn = (dx * bl.vy - dy * bl.vx) > 0 ? 1 : -1;
+      const w = 1 - Math.sqrt(d2) / 140;
+      avoidX += -bl.vy * sgn * w; avoidY += bl.vx * sgn * w;
+      threat += w;
+    }
+    for (const as of asteroids) {
+      const dx = wdx(as.x, s.x), dy = wdy(as.y, s.y);
+      const d = Math.hypot(dx, dy) - as.r - SHIP_R;
+      if (d > 90) continue;
+      const w = 1 - Math.max(d, 0) / 90;
+      avoidX += dx / (d + as.r) * 400 * w; avoidY += dy / (d + as.r) * 400 * w;
+      threat += w * 1.5;
+    }
+    if (threat > 0.35) {
+      desired = Math.atan2(avoidY, avoidX);
+      thrust = Math.abs(wrapAngle(desired - s.a)) < 1.0;
+      fire = fire && threat < 1;
+    }
+
+    // Rotate toward desired heading.
+    const diff = wrapAngle(desired - s.a);
+    const maxTurn = TURN_RATE * dt;
+    s.a = wrapAngle(s.a + Math.max(-maxTurn, Math.min(maxTurn, diff)));
+    s.thrusting = thrust;
+
+    if (fire && s.cool <= 0) {
+      s.cool = FIRE_COOLDOWN * rand(0.9, 1.3);
+      const cx = Math.cos(s.a), cy = Math.sin(s.a);
+      bullets.push({
+        x: s.x + cx * SHIP_R, y: s.y + cy * SHIP_R,
+        vx: s.vx + cx * BULLET_SPEED, vy: s.vy + cy * BULLET_SPEED,
+        life: BULLET_LIFE, team: s.team, owner: s,
+      });
+    }
+  }
+
+  // ---- simulation ----
+  function hitShip(s, attacker) {
+    if (s.invuln > 0) return;
+    s.hp--;
+    burst(s.x, s.y, TEAMS[s.team].color, 6, 90);
+    if (s.hp <= 0) killShip(s, attacker);
+  }
+
+  function killShip(s, attacker) {
+    s.alive = false; s.respawn = RESPAWN_TIME; s.deaths++;
+    burst(s.x, s.y, TEAMS[s.team].color, 40, 220);
+    burst(s.x, s.y, '#fff', 15, 140);
+    if (attacker && attacker.team !== s.team) { score[attacker.team]++; attacker.kills++; }
+  }
+
+  function breakAsteroid(as, i) {
+    asteroids.splice(i, 1);
+    burst(as.x, as.y, '#9aa', 12 * as.size, 120);
+    if (as.size > 1) {
+      for (let k = 0; k < 2; k++) asteroids.push(makeAsteroid(as.x, as.y, as.size - 1));
+    }
+  }
+
+  function step(dt) {
+    for (const s of ships) {
+      if (!s.alive) {
+        s.respawn -= dt;
+        if (s.respawn <= 0) resetShip(s);
+        continue;
+      }
+      s.cool -= dt; s.invuln -= dt;
+      steer(s, dt);
+      if (s.thrusting) {
+        s.vx += Math.cos(s.a) * THRUST * dt;
+        s.vy += Math.sin(s.a) * THRUST * dt;
+        if (Math.random() < 0.6) {
+          particles.push({
+            x: s.x - Math.cos(s.a) * SHIP_R, y: s.y - Math.sin(s.a) * SHIP_R,
+            vx: s.vx - Math.cos(s.a + rand(-0.3, 0.3)) * 120, vy: s.vy - Math.sin(s.a + rand(-0.3, 0.3)) * 120,
+            life: 0.25, max: 0.25, color: '#ffd166',
+          });
+        }
+      }
+      const drag = Math.exp(-DRAG * dt);
+      s.vx *= drag; s.vy *= drag;
+      const sp = Math.hypot(s.vx, s.vy);
+      if (sp > MAX_SPEED) { s.vx *= MAX_SPEED / sp; s.vy *= MAX_SPEED / sp; }
+      s.x += s.vx * dt; s.y += s.vy * dt;
+      wrapPos(s);
+    }
+
+    // Ship-ship collisions (ram damage both).
+    for (let i = 0; i < ships.length; i++) {
+      const a = ships[i]; if (!a.alive) continue;
+      for (let j = i + 1; j < ships.length; j++) {
+        const b = ships[j]; if (!b.alive) continue;
+        const dx = wdx(a.x, b.x), dy = wdy(a.y, b.y);
+        const d = Math.hypot(dx, dy);
+        if (d < SHIP_R * 1.6 && d > 0) {
+          const nx = dx / d, ny = dy / d, push = (SHIP_R * 1.6 - d) / 2;
+          a.x -= nx * push; a.y -= ny * push; b.x += nx * push; b.y += ny * push;
+          const rv = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
+          if (rv < 0) { a.vx += rv * nx; a.vy += rv * ny; b.vx -= rv * nx; b.vy -= rv * ny; }
+          if (a.team !== b.team && -rv > 120) { hitShip(a, b); hitShip(b, a); }
+        }
+      }
+    }
+
+    // Bullets.
+    for (let i = bullets.length - 1; i >= 0; i--) {
+      const bl = bullets[i];
+      bl.x += bl.vx * dt; bl.y += bl.vy * dt; bl.life -= dt;
+      wrapPos(bl);
+      let dead = bl.life <= 0;
+      if (!dead) {
+        for (const s of ships) {
+          if (!s.alive || s.team === bl.team) continue;
+          const dx = wdx(bl.x, s.x), dy = wdy(bl.y, s.y);
+          if (dx * dx + dy * dy < SHIP_R * SHIP_R) { hitShip(s, bl.owner); dead = true; break; }
+        }
+      }
+      if (!dead) {
+        for (let k = asteroids.length - 1; k >= 0; k--) {
+          const as = asteroids[k];
+          const dx = wdx(bl.x, as.x), dy = wdy(bl.y, as.y);
+          if (dx * dx + dy * dy < as.r * as.r) {
+            dead = true;
+            if (--as.hp <= 0) breakAsteroid(as, k);
+            else burst(bl.x, bl.y, '#9aa', 4, 60);
+            break;
+          }
+        }
+      }
+      if (dead) bullets.splice(i, 1);
+    }
+
+    // Asteroids.
+    for (const as of asteroids) {
+      as.x += as.vx * dt; as.y += as.vy * dt; as.a += as.spin * dt;
+      wrapPos(as);
+    }
+    for (const s of ships) {
+      if (!s.alive) continue;
+      for (let k = asteroids.length - 1; k >= 0; k--) {
+        const as = asteroids[k];
+        const dx = wdx(as.x, s.x), dy = wdy(as.y, s.y);
+        const d = Math.hypot(dx, dy);
+        if (d < as.r + SHIP_R * 0.7) {
+          if (s.invuln <= 0) { killShip(s, null); breakAsteroid(as, k); }
+          else { // bounce off while invulnerable
+            const nx = dx / (d || 1), ny = dy / (d || 1);
+            s.vx = nx * 120; s.vy = ny * 120;
+          }
+          break;
+        }
+      }
+    }
+    if (asteroidsOn && asteroids.length < 3) {
+      // Bring a fresh rock in from an edge.
+      const edge = Math.random() < 0.5;
+      asteroids.push(makeAsteroid(edge ? 0 : rand(0, W), edge ? rand(0, H) : 0, 3));
+    }
+
+    // Particles.
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.98; p.vy *= 0.98; p.life -= dt;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+  }
+
+  // ---- render ----
+  // Draw something at (x,y) and its wrapped ghosts if it straddles an edge.
+  function drawWrapped(x, y, r, fn) {
+    const xs = [x], ys = [y];
+    if (x < r) xs.push(x + W); else if (x > W - r) xs.push(x - W);
+    if (y < r) ys.push(y + H); else if (y > H - r) ys.push(y - H);
+    for (const px of xs) for (const py of ys) fn(px, py);
+  }
+
+  function drawShip(s) {
+    const team = TEAMS[s.team];
+    const blink = s.invuln > 0 && Math.floor(s.invuln * 10) % 2 === 0;
+    drawWrapped(s.x, s.y, SHIP_R * 2, (x, y) => {
+      ctx.save();
+      ctx.translate(x, y); ctx.rotate(s.a);
+      ctx.globalAlpha = blink ? 0.35 : 1;
+      ctx.shadowColor = team.glow; ctx.shadowBlur = 12;
+      ctx.strokeStyle = team.color; ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(SHIP_R * 1.3, 0);
+      ctx.lineTo(-SHIP_R, SHIP_R * 0.8);
+      ctx.lineTo(-SHIP_R * 0.55, 0);
+      ctx.lineTo(-SHIP_R, -SHIP_R * 0.8);
+      ctx.closePath();
+      ctx.stroke();
+      if (s.thrusting && Math.random() < 0.8) {
+        ctx.strokeStyle = '#ffd166';
+        ctx.beginPath();
+        ctx.moveTo(-SHIP_R * 0.7, SHIP_R * 0.35);
+        ctx.lineTo(-SHIP_R * rand(1.3, 1.8), 0);
+        ctx.lineTo(-SHIP_R * 0.7, -SHIP_R * 0.35);
+        ctx.stroke();
+      }
+      ctx.restore();
+      // HP pips
+      ctx.fillStyle = team.color;
+      for (let i = 0; i < s.hp; i++) ctx.fillRect(x - 7 + i * 5, y + SHIP_R + 6, 3, 3);
+    });
+  }
+
+  function drawAsteroid(as) {
+    drawWrapped(as.x, as.y, as.r * 1.2, (x, y) => {
+      ctx.save();
+      ctx.translate(x, y); ctx.rotate(as.a);
+      ctx.strokeStyle = '#8a94a6'; ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      const n = as.shape.length;
+      for (let i = 0; i < n; i++) {
+        const ang = (i / n) * TAU, rr = as.r * as.shape[i];
+        i ? ctx.lineTo(Math.cos(ang) * rr, Math.sin(ang) * rr) : ctx.moveTo(Math.cos(ang) * rr, Math.sin(ang) * rr);
+      }
+      ctx.closePath(); ctx.stroke();
+      ctx.restore();
+    });
+  }
+
+  function render() {
+    ctx.fillStyle = '#05060a';
+    ctx.fillRect(0, 0, W, H);
+    for (const st of stars) {
+      ctx.fillStyle = `rgba(255,255,255,${0.15 + st.b * 0.5})`;
+      ctx.fillRect(st.x * W, st.y * H, st.b > 0.85 ? 2 : 1, st.b > 0.85 ? 2 : 1);
+    }
+
+    for (const as of asteroids) drawAsteroid(as);
+
+    for (const p of particles) {
+      ctx.globalAlpha = Math.max(0, p.life / p.max);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(p.x - 1, p.y - 1, 2, 2);
+    }
+    ctx.globalAlpha = 1;
+
+    for (const bl of bullets) {
+      ctx.fillStyle = TEAMS[bl.team].color;
+      ctx.shadowColor = TEAMS[bl.team].glow; ctx.shadowBlur = 8;
+      ctx.beginPath(); ctx.arc(bl.x, bl.y, 2, 0, TAU); ctx.fill();
+    }
+    ctx.shadowBlur = 0;
+
+    for (const s of ships) if (s.alive) drawShip(s);
+
+    if (debug) {
+      ctx.lineWidth = 1;
+      for (const s of ships) {
+        if (!s.alive || !s.target) continue;
+        ctx.strokeStyle = TEAMS[s.team].glow; ctx.globalAlpha = 0.35;
+        ctx.beginPath(); ctx.moveTo(s.x, s.y);
+        ctx.lineTo(s.x + wdx(s.x, s.target.x), s.y + wdy(s.y, s.target.y)); ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    if (paused) {
+      ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#fff'; ctx.font = '600 28px ui-monospace, Menlo, monospace';
+      ctx.textAlign = 'center'; ctx.fillText('PAUSED', W / 2, H / 2);
+    }
+  }
+
+  // ---- HUD ----
+  const $ = id => document.getElementById(id);
+  function hud() {
+    $('sb').textContent = score[0]; $('sr').textContent = score[1];
+    $('ab').textContent = ships.filter(s => s.team === 0 && s.alive).length;
+    $('ar').textContent = ships.filter(s => s.team === 1 && s.alive).length;
+    $('status').textContent = (speed !== 1 ? `${speed}x ` : '') + (asteroidsOn ? '' : 'no asteroids');
+  }
+
+  // ---- input ----
+  window.addEventListener('keydown', e => {
+    if (e.code === 'Space') { paused = !paused; e.preventDefault(); }
+    else if (e.key === 'r' || e.key === 'R') reset();
+    else if (e.key === '1') speed = 1;
+    else if (e.key === '2') speed = 2;
+    else if (e.key === '3') speed = 4;
+    else if (e.key === 'a' || e.key === 'A') { asteroidsOn = !asteroidsOn; spawnAsteroids(); }
+    else if (e.key === 'd' || e.key === 'D') debug = !debug;
+  });
+  canvas.addEventListener('click', () => { paused = !paused; });
+
+  // ---- loop ----
+  let last = performance.now();
+  function frame(now) {
+    const elapsed = Math.min((now - last) / 1000, 0.1);
+    last = now;
+    if (!paused) {
+      // fixed sub-steps for stable physics at higher speeds
+      const total = elapsed * speed;
+      const n = Math.max(1, Math.ceil(total / (1 / 120)));
+      for (let i = 0; i < n; i++) step(total / n);
+    }
+    render();
+    hud();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
