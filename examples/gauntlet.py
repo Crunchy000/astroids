@@ -25,6 +25,8 @@ BOT_STYLES = ["bots", "bots:rusher", "bots:sniper", "bots:zone"]
 HALL_OF_FAME = {
     "league striker": "results/league_striker.zip",
     "population m16": "results/population_best.zip",
+    "attention model": "results/attention_best.zip",
+    "colab m08": "results/colab_population_best.zip",
 }
 
 
@@ -68,7 +70,7 @@ def gauntlet(team: str, opponents: dict[str, str], battles: int = 20, seed: int 
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("teams", nargs="+", help="team models (.zip or .npz) to score")
-    p.add_argument("--hof", nargs="*", default=None, help="hall-of-fame models (default: league striker, m16)")
+    p.add_argument("--hof", nargs="*", default=None, help="hall-of-fame models (default: league striker, m16, attention model, colab m08)")
     p.add_argument("--battles", type=int, default=20, help="battles per opponent (half on each side)")
     p.add_argument("--seed", type=int, default=500_000)
     p.add_argument("--names", help="comma-separated display names for the teams (for --json)")

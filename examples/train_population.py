@@ -57,7 +57,7 @@ import torch  # noqa: E402
 from stable_baselines3 import PPO  # noqa: E402
 
 from astroids_gym.bot import STYLES  # noqa: E402
-from league import export_policy, fit_elo, tournament, win_matrix  # noqa: E402
+from league import FRAME_SKIP, MAX_STEPS, export_policy, fit_elo, make_rules, tournament, win_matrix  # noqa: E402
 from train_league import (PERSONALITIES, LeagueVecEnv, ThreadSwitch, grow_model,  # noqa: E402
                           net_widths, opponent_mix)
 
@@ -162,6 +162,14 @@ def main():
     os.makedirs(f"{args.out}/models", exist_ok=True)
     venv = LeagueVecEnv(args.n_workers, args.battles_per_worker, seed=args.seed, rules=args.rules,
                         central=args.critic == "central", bank=bank)
+    # Each member's turn resets every battle, so a turn shorter than one battle never
+    # trains on the late game (zone fights, the result). It needs samples-per-round
+    # >= battle steps x env slots (n_workers x battles_per_worker x 5).
+    battle_steps = min(MAX_STEPS, round(make_rules(args.rules)[0].battle_seconds * 60 / FRAME_SKIP))
+    if args.samples_per_round < battle_steps * venv.num_envs:
+        print(f"WARNING: {args.samples_per_round:,} samples per round over {venv.num_envs} ship slots is "
+              f"{args.samples_per_round // venv.num_envs} steps each, less than one {battle_steps}-step battle: "
+              f"no battle will finish. Lower --battles-per-worker or raise --samples-per-round.", flush=True)
     base_hyper = {"n_steps": args.n_steps, "batch_size": args.n_steps * venv.num_envs // 4}
     bots = BOT_SPECS if args.sampling == "pfsp" else ["bots"]
 
