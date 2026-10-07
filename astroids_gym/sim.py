@@ -112,10 +112,12 @@ class Events:
         self.deaths = [0] * n
         self.shots = [0] * n
         self.team_hits = [0] * n  # friendly-fire hits this ship landed on teammates
+        self.overheats = [0] * n  # times this ship's gun locked from heat
         self.zone_points = [0.0, 0.0]  # per team
 
     def merge(self, other: "Events") -> None:
-        for name in ("hits_dealt", "hits_taken", "kills", "deaths", "shots", "team_hits", "zone_points"):
+        for name in ("hits_dealt", "hits_taken", "kills", "deaths", "shots", "team_hits", "overheats",
+                     "zone_points"):
             mine, theirs = getattr(self, name), getattr(other, name)
             for i, v in enumerate(theirs):
                 mine[i] += v
@@ -310,6 +312,7 @@ class Simulation:
                     s.heat += cfg.heat_per_shot
                     if s.heat >= 1.0:
                         s.overheated = True
+                        ev.overheats[s.id] += 1
                 cx, cy = math.cos(s.a), math.sin(s.a)
                 self.bullets.append(Bullet(
                     s.x + cx * cfg.ship_r, s.y + cy * cfg.ship_r,

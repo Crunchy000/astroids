@@ -51,6 +51,7 @@ class RewardConfig:
     zone: float = 0.0
     friendly_hit: float = 0.0
     win: float = 0.0
+    overheat: float = 0.0  # per time this ship's gun locks from heat (trigger discipline)
 
     def final(self, sim: Simulation, team: int) -> float:
         """End-of-battle reward for a ship on ``team``."""
@@ -75,7 +76,8 @@ class RewardConfig:
     def individual(self, ev: Events, i: int) -> float:
         return (self.kill * ev.kills[i] + self.death * ev.deaths[i]
                 + self.hit_dealt * ev.hits_dealt[i] + self.hit_taken * ev.hits_taken[i]
-                + self.shot * ev.shots[i] + self.friendly_hit * ev.team_hits[i])
+                + self.shot * ev.shots[i] + self.friendly_hit * ev.team_hits[i]
+                + self.overheat * ev.overheats[i])
 
     def rewards(self, sim: Simulation, ev: Events) -> list[float]:
         own = [self.individual(ev, i) for i in range(sim.n_ships)]

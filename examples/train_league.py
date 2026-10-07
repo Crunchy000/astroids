@@ -40,9 +40,12 @@ from astroids_gym import ACTION_SPACE, Config
 from astroids_gym.obs import observation_space
 from league import _worker, export_policy, fit_elo, make_rules, tournament, win_matrix
 
-# Shared by every personality: zone points, the battle result and friendly fire
-# (inert under classic rules, where there is no zone and no friendly fire).
-_BASE = {"hit_dealt": 0.2, "hit_taken": -0.2, "zone": 0.15, "win": 3.0, "friendly_hit": -0.3}
+# Shared by every personality: zone points, the battle result, friendly fire and
+# trigger discipline (inert under classic rules: no zone, friendly fire or heat).
+# The overheat penalty and small shot cost break the classic-rules habit of
+# spraying: in early competitive play the agents' guns were locked ~46% of the time.
+_BASE = {"hit_dealt": 0.2, "hit_taken": -0.2, "zone": 0.15, "win": 3.0, "friendly_hit": -0.3,
+         "overheat": -0.25, "shot": -0.01}
 PERSONALITIES = {
     # Values kills far above its own survival.
     "striker": {**_BASE, "kill": 1.5, "death": -0.5, "hit_dealt": 0.3, "hit_taken": -0.1,
