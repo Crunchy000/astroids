@@ -11,6 +11,7 @@ only goes up if a team is better against *everything*, not just the bots.
 """
 
 import argparse
+import json
 import os
 import tempfile
 
@@ -70,18 +71,26 @@ def main():
     p.add_argument("--hof", nargs="*", default=None, help="hall-of-fame models (default: league striker, m16)")
     p.add_argument("--battles", type=int, default=20, help="battles per opponent (half on each side)")
     p.add_argument("--seed", type=int, default=500_000)
+    p.add_argument("--names", help="comma-separated display names for the teams (for --json)")
+    p.add_argument("--json", help="also write the results here (for plot_gauntlet.py)")
     args = p.parse_args()
+    names = args.names.split(",") if args.names else [os.path.basename(t) for t in args.teams]
+    report = {"battles": args.battles, "teams": {}}
 
     with tempfile.TemporaryDirectory() as tmp:
         hof = ({os.path.basename(h): h for h in args.hof} if args.hof is not None else HALL_OF_FAME)
         opponents = {s: s for s in BOT_STYLES} | {n: as_spec(h, tmp) for n, h in hof.items() if os.path.exists(h)}
-        for team in args.teams:
+        for team, display in zip(args.teams, names):
             spec = as_spec(team, tmp)
             res = gauntlet(spec, opponents, args.battles, args.seed)
             score = np.mean([w for w, _ in res.values()])
             print(f"\n{team}: gauntlet score {score:.0%} ({args.battles} battles per opponent)")
             for name, (w, m) in res.items():
                 print(f"  vs {name:16} wins {w:4.0%}  score margin {m:+5.1f}")
+            report["teams"][display] = {"score": float(score), "vs": {n: list(v) for n, v in res.items()}}
+    if args.json:
+        with open(args.json, "w") as f:
+            json.dump(report, f, indent=1)
 
 
 if __name__ == "__main__":
