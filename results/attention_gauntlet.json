@@ -1,0 +1,88 @@
+{
+ "battles": 40,
+ "teams": {
+  "Attention model": {
+   "score": 0.9125,
+   "vs": {
+    "bots": [
+     0.95,
+     11.0
+    ],
+    "bots:rusher": [
+     0.95,
+     7.8
+    ],
+    "bots:sniper": [
+     1.0,
+     20.3
+    ],
+    "bots:zone": [
+     0.975,
+     13.2
+    ],
+    "league striker": [
+     0.9,
+     10.9
+    ],
+    "population m16": [
+     0.7,
+     6.8
+    ]
+   }
+  },
+  "MLP twin (same training)": {
+   "score": 0.8667,
+   "vs": {
+    "bots": [
+     0.825,
+     4.3
+    ],
+    "bots:rusher": [
+     0.9,
+     3.2
+    ],
+    "bots:sniper": [
+     1.0,
+     14.2
+    ],
+    "bots:zone": [
+     0.925,
+     7.3
+    ],
+    "league striker": [
+     0.975,
+     10.2
+    ],
+    "population m16": [
+     0.575,
+     1.7
+    ]
+   }
+  },
+  "m16 (starting point)": {
+   "score": 0.86,
+   "vs": {
+    "bots": [
+     0.825,
+     3.8
+    ],
+    "bots:rusher": [
+     0.75,
+     1.5
+    ],
+    "bots:sniper": [
+     1.0,
+     12.6
+    ],
+    "bots:zone": [
+     0.825,
+     5.0
+    ],
+    "league striker": [
+     0.9,
+     7.6
+    ]
+   }
+  }
+ }
+}

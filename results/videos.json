@@ -1,6 +1,84 @@
 {
   "sections": [
     {
+      "id": "attention",
+      "title": "Smarter: attention over entities",
+      "summary": "An attention network treats every ship, bullet and asteroid it can see as a separate item, and one transformer layer lets it weigh them against each other. The plain network (MLP) reads them as one long list of numbers. The attention model started as a copy of m16: it imitated m16's decisions over 200 battles, including two rounds where it flew and m16 marked what it should have done, and then won 40% against m16. Next, it and an MLP copy of m16 trained side by side for 8 rounds with identical settings. Both used a critic that sees the whole battle, opponents picked more often the more they win, and the three bot styles. On fresh battles the attention model beat its MLP twin 62% of the time (180 battles, rounds 6 to 8), and it scored 91% on the gauntlet, against 87% for the MLP and 86% for m16. Its biggest gains were against the rusher and zone bots, m16's weak spots. The cost: on 4 CPU cores it trains about 4 times slower (1,200 vs 4,800 samples per second).",
+      "table": {
+        "columns": [
+          "Opponent (40 fresh battles each)",
+          "Attention model",
+          "MLP twin",
+          "m16 (start)"
+        ],
+        "rows": [
+          [
+            "Gauntlet score (mean)",
+            "91%",
+            "87%",
+            "86%"
+          ],
+          [
+            "vs m16",
+            "70%",
+            "57%",
+            "—"
+          ],
+          [
+            "vs built-in bots",
+            "95%",
+            "82%",
+            "82%"
+          ],
+          [
+            "vs rusher bots",
+            "95%",
+            "90%",
+            "75%"
+          ],
+          [
+            "vs zone bots",
+            "98%",
+            "92%",
+            "82%"
+          ],
+          [
+            "vs sniper bots",
+            "100%",
+            "100%",
+            "100%"
+          ],
+          [
+            "vs league striker",
+            "90%",
+            "98%",
+            "90%"
+          ]
+        ],
+        "highlight": 0
+      },
+      "charts": [
+        {
+          "src": "results/attention_gauntlet.png",
+          "alt": "Gauntlet win rates with 95% intervals. Attention model: 95% vs bots, 95% vs rusher, 100% vs sniper, 98% vs zone, 90% vs league striker, 70% vs m16. MLP twin: 82, 90, 100, 92, 98 and 57%. m16: 82, 75, 100, 82 and 90%."
+        }
+      ],
+      "videos": [
+        {
+          "src": "results/attention_vs_m16.mp4",
+          "title": "Attention model vs m16",
+          "note": "Same battle seed as the other clips. Blue (attention) wins by wipe-out at 40 s, 28.7 to 21.5.",
+          "poster": "results/attention_vs_m16.jpg"
+        },
+        {
+          "src": "results/attention_vs_bots.mp4",
+          "title": "Attention model vs the bots",
+          "note": "Same seed. Blue (attention) wins by wipe-out at 45 s, 39.1 to 31.2 (m16 won this battle 30.3 to 28.8).",
+          "poster": "results/attention_vs_bots.jpg"
+        }
+      ]
+    },
+    {
       "id": "population",
       "title": "An evolving population of teams",
       "summary": "Population-based training: 8 team models, each with a genome (reward weights, learning rate, exploration, network width), seeded from the three league finalists. Every 2 rounds the bottom quarter was replaced by mutated copies of the top quarter, and a copy could grow its network by 64 units per layer without changing its play. In 16 rounds (about 3 hours on 4 CPU cores) the guardian line died out by round 2 and pack by round 6; striker descendants took over and kept improving. The winner, m16 (four generations from the striker, grown to 320 units), beat the bots in 77% (± 5%) of 60 fresh battles and the league striker in 87%. Its genome evolved to value kills (2.3 vs 1.5) and winning (3.75 vs 3.0) more, with a slower learning rate. Half the final population had grown networks (320 to 384 units); bigger nets were often but not always selected.",

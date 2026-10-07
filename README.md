@@ -163,6 +163,52 @@ Results (`results/population_*`), 8 members, 16 rounds, about 3 hours on 4 cores
 
 Half the final population had grown networks (320 to 384 units). Bigger networks were often but not always selected: the first one grown (m11) was culled, while m15 and m16 (320) and m17 (384) reached the top. The model is `results/population_best.zip`; videos: [m16 vs bots](results/population_best_vs_bots.mp4) · [m16 vs league striker](results/population_best_vs_striker.mp4).
 
+## Getting smarter
+
+### A gauntlet to measure it
+
+```bash
+python examples/gauntlet.py results/attention_best.zip results/population_best.zip --battles 40 --json g.json
+python examples/plot_gauntlet.py g.json --out gauntlet.png
+```
+
+Elo inside one population only says who beats whom *there*. The gauntlet scores a team against fixed, varied opponents on fresh battle seeds, from both sides: the default bots; three bot styles that punish different weaknesses (`bots:rusher` charges to point-blank range, `bots:sniper` holds at long range, `bots:zone` sits in the control zone); and a hall of fame (league striker, m16). The gauntlet score is the mean win rate, so it only goes up if a team gets better against everything.
+
+### Training upgrades
+
+`train_population.py` now has four upgrades. Each can be switched off for comparison.
+
+* **A critic that sees the whole battle** (`--critic central`, `astroids_gym/policies.py`). The value network also reads the global state (`obs.global_state`: every ship, both teams' respawns and zone points, the clock), while the actor still flies from its own ship's view. Existing models convert with identical actions and values.
+* **Prioritised opponents** (`--sampling pfsp`). Each member keeps its record against every opponent and picks opponents with weight (1 − p)², where p is its win rate against them. Hard opponents come up often, easy ones rarely, and the bots' share is spread over the bot styles the same way.
+* **Exploiters** (`--exploiters`). Extra models train only to beat the current best member. When one wins 65% of a 40-battle check, its snapshot joins every member's opponent pool, so the population must fix the weakness it found.
+* **Line protection.** Selection never removes the last member of a founder line, so different reward personalities stay in play.
+
+### Attention over entities
+
+```bash
+python examples/distill.py --teacher results/population_best.zip --out entity_student.zip
+python examples/train_population.py --founders results/population_best.zip:evolved,entity_student.zip:evolved \
+    --size 2 --exploiters 0 --exploit-every 1000 --rounds 8 --tournament-battles 40
+```
+
+`EntityPolicy` treats every ship, bullet and asteroid in view as a separate token with its own embedding, shared across slots. One transformer layer lets the tokens attend to each other, with absent slots masked out. The ship's own token and the mean over present entities then feed the usual MLP head. The critic stays a centralised MLP. A NumPy version (`astroids_gym/entity.py`, tested equal to the torch one) lets workers and tournaments play it without torch.
+
+Training it from scratch would throw away what m16 learned, so `distill.py` first trains it to copy m16. Over 120 battles against varied opponents it learns m16's action probabilities, then two DAgger rounds let it fly while m16 labels what it should have done. The copy won 40% against m16 and 83% against the bots. Then the copy and an MLP twin of m16 trained side by side for 8 rounds (3.2M samples each) with identical settings: centralised critic, prioritised opponents, bot styles.
+
+| Opponent (40 fresh battles each) | Attention | MLP twin | m16 (start) |
+|---|---|---|---|
+| **Gauntlet score** | **91%** | 87% | 86% |
+| vs m16 | 70% | 57% | — |
+| vs built-in bots | 95% | 82% | 82% |
+| vs rusher / zone / sniper bots | 95% / 98% / 100% | 90% / 92% / 100% | 75% / 82% / 100% |
+| vs league striker | 90% | 98% | 90% |
+
+Head to head on fresh seeds, the attention model's last three snapshots beat the MLP twin's in 62% of 180 battles (± 4%). Per training sample, attention learns a better policy, especially against the rusher and zone bots that troubled m16. Per hour it is costlier: on 4 CPU cores it trains at about 1,200 samples/s against 4,800 for the MLP, and its NumPy forward pass is about 20 times slower. The model is `results/attention_best.zip`; chart `results/attention_gauntlet.png`; videos: [attention vs m16](results/attention_vs_m16.mp4) · [attention vs bots](results/attention_vs_bots.mp4).
+
+### Where the training time goes
+
+On this 4-core CPU with the centralised critic, one PPO iteration splits about 49% PPO update, 29% battle simulation and 22% network inference. The collision checks and the scripted bot were sped up without changing any result: 12 full battles of trajectories and 288k bot actions are bit-identical, and the physics step is about 1.4x faster. That only saves about 5% end to end. The network maths is now the bottleneck, so a GPU (or fewer PPO epochs) is where a big speed-up would come from.
+
 ## Videos
 
 ```bash
