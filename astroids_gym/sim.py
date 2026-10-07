@@ -336,9 +336,10 @@ class Simulation:
         """Living ships of each team inside the control zone."""
         cfg = self.cfg
         cx, cy, r2 = cfg.width / 2, cfg.height / 2, cfg.zone_radius ** 2
+        w, h, hw, hh = self._w, self._h, self._hw, self._hh
         inside = [0, 0]
-        for s in self.ships:
-            if s.alive and self.wdx(cx, s.x) ** 2 + self.wdy(cy, s.y) ** 2 < r2:
+        for s in self.ships:  # wdx / wdy inlined (called every tick)
+            if s.alive and ((s.x - cx + hw) % w - hw) ** 2 + ((s.y - cy + hh) % h - hh) ** 2 < r2:
                 inside[s.team] += 1
         return inside
 
@@ -379,6 +380,8 @@ class Simulation:
 
     def _ship_collisions(self, ev: Events) -> None:
         r2 = self.cfg.ship_r * 1.6
+        near = (r2 * 1.001) ** 2  # cheap squared-distance pre-check; hypot decides as before
+        w, h, hw, hh = self._w, self._h, self._hw, self._hh
         ships = self.ships
         for i, a in enumerate(ships):
             if not a.alive:
@@ -386,7 +389,9 @@ class Simulation:
             for b in ships[i + 1:]:
                 if not b.alive:
                     continue
-                dx, dy = self.wdx(a.x, b.x), self.wdy(a.y, b.y)
+                dx, dy = (b.x - a.x + hw) % w - hw, (b.y - a.y + hh) % h - hh
+                if dx * dx + dy * dy >= near:
+                    continue
                 d = math.hypot(dx, dy)
                 if 0 < d < r2:
                     nx, ny = dx / d, dy / d
@@ -427,7 +432,7 @@ class Simulation:
             if not dead:
                 for k in range(len(self.asteroids) - 1, -1, -1):
                     a = self.asteroids[k]
-                    dx, dy = self.wdx(bl.x, a.x), self.wdy(bl.y, a.y)
+                    dx, dy = (a.x - bl.x + hw) % w - hw, (a.y - bl.y + hh) % h - hh
                     if dx * dx + dy * dy < a.r * a.r:
                         dead = True
                         a.hp -= 1
@@ -441,17 +446,23 @@ class Simulation:
     def _asteroids(self, ev: Events) -> None:
         cfg = self.cfg
         dt = cfg.dt
+        w, h, hw, hh = self._w, self._h, self._hw, self._hh
         for a in self.asteroids:
             a.x += a.vx * dt
             a.y += a.vy * dt
             a.a += a.spin * dt
-            self._wrap(a)
+            a.x %= w
+            a.y %= h
+        reach = cfg.ship_r * 0.7
         for s in self.ships:
             if not s.alive:
                 continue
             for k in range(len(self.asteroids) - 1, -1, -1):
                 a = self.asteroids[k]
-                dx, dy = self.wdx(a.x, s.x), self.wdy(a.y, s.y)
+                dx, dy = (s.x - a.x + hw) % w - hw, (s.y - a.y + hh) % h - hh
+                r = a.r + reach
+                if dx * dx + dy * dy >= r * r * 1.002:  # clearly apart; hypot decides close calls as before
+                    continue
                 d = math.hypot(dx, dy)
                 if d < a.r + cfg.ship_r * 0.7:
                     if s.invuln <= 0:

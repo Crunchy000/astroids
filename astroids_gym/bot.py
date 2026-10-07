@@ -47,12 +47,14 @@ def scripted_action(sim: Simulation, s: Ship, horizon: int = 1, style: str | Non
     cfg = sim.cfg
     if not s.alive:
         return (0.0, False, False)
+    ww, wh = cfg.width, cfg.height
+    hw, hh = ww / 2, wh / 2
 
     best, best_d = None, math.inf
     for o in sim.ships:
         if not o.alive or o.team == s.team:
             continue
-        d = math.hypot(sim.wdx(s.x, o.x), sim.wdy(s.y, o.y))
+        d = math.hypot((o.x - s.x + hw) % ww - hw, (o.y - s.y + hh) % wh - hh)  # inlined wdx / wdy
         if o is s.target:
             d *= 0.8  # mild target stickiness
         if d < best_d:
@@ -109,8 +111,6 @@ def scripted_action(sim: Simulation, s: Ship, horizon: int = 1, style: str | Non
 
     # Dodge enemy bullets heading our way and nearby asteroids.
     ax = ay = threat = 0.0
-    ww, wh = cfg.width, cfg.height
-    hw, hh = ww / 2, wh / 2
     for bl in sim.bullets:
         if bl.team == s.team:
             continue
@@ -125,7 +125,10 @@ def scripted_action(sim: Simulation, s: Ship, horizon: int = 1, style: str | Non
         ay += bl.vx * sgn * w
         threat += w
     for ast in sim.asteroids:
-        dx, dy = sim.wdx(ast.x, s.x), sim.wdy(ast.y, s.y)
+        dx, dy = (s.x - ast.x + hw) % ww - hw, (s.y - ast.y + hh) % wh - hh
+        reach = 90 + ast.r + cfg.ship_r
+        if dx * dx + dy * dy > reach * reach * 1.002:  # clearly out of range; hypot decides close calls
+            continue
         d = math.hypot(dx, dy) - ast.r - cfg.ship_r
         if d > 90:
             continue
