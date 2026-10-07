@@ -263,3 +263,39 @@ def test_central_critic_policy_matches_mlp_actor():
         assert not torch.allclose(pol.predict_values(x), pol.predict_values(y))
         assert torch.allclose(pol.get_distribution(y).distribution[0].logits, pol.get_distribution(x).distribution[0].logits)
     assert pol.mlp_extractor.value_net[0].in_features == n + g
+
+
+def test_entity_policy_numpy_export_matches_torch(tmp_path):
+    pytest.importorskip("stable_baselines3")
+    import sys
+    import torch
+    from gymnasium import spaces
+
+    from astroids_gym import ACTION_SPACE
+    from astroids_gym.obs import ObsConfig, encode_battle
+    from astroids_gym.policies import EntityPolicy
+
+    sys.path.insert(0, "examples")
+    from league import NumpyPolicy, export_policy
+
+    oc = ObsConfig(extended=True)
+    pol = EntityPolicy(spaces.Box(-1, 1, (oc.size + 7,), np.float32), ACTION_SPACE, lambda _: 1e-3,
+                       net_arch=[32, 32], n_actor_inputs=oc.size, entity_kwargs={"d": 16, "heads": 2})
+
+    class M:  # just what export_policy reads
+        policy = pol
+
+    sim = Simulation(Config.competitive(), seed=1)
+    for _ in range(60):
+        sim.step({s.id: scripted_action(sim, s) for s in sim.ships})
+    sim.ships[3].alive = False
+    obs = np.concatenate([encode_battle(sim, range(10), oc), np.random.default_rng(0).random((10, 7))], 1)
+    obs = obs.astype(np.float32)
+    with torch.no_grad():
+        ref = torch.cat([d.logits for d in pol.get_distribution(torch.as_tensor(obs)).distribution], 1).numpy()
+    npol = NumpyPolicy(export_policy(M, str(tmp_path / "e.npz")))
+    out = npol.logits(obs[:, :oc.size])
+    # Each head's logits are defined up to a constant (torch normalises them): compare softmaxes.
+    for a, b in zip(np.split(ref, [5, 7], 1), np.split(out, [5, 7], 1)):
+        pa, pb = np.exp(a - a.max(1, keepdims=True)), np.exp(b - b.max(1, keepdims=True))
+        assert np.allclose(pa / pa.sum(1, keepdims=True), pb / pb.sum(1, keepdims=True), atol=1e-5)

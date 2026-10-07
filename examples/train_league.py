@@ -194,13 +194,16 @@ def grow_model(old: PPO, venv, hyper: dict, seed: int, widths: list[int] | None 
     zero, so the new parts add nothing to the output yet. New hidden units keep
     a random incoming init, so they still get gradient and the network can learn
     to use them. The optimiser starts fresh. If ``venv.central`` is set, the new
-    model uses ``CentralCriticPolicy`` (an ``MlpPolicy`` model converts to one).
+    model uses ``CentralCriticPolicy`` (an ``MlpPolicy`` model converts to one);
+    an ``EntityPolicy`` model stays one (its MLP head and critic can widen).
     """
     widths = widths or net_widths(old)
     policy, kwargs = "MlpPolicy", {"net_arch": list(widths)}
     if getattr(venv, "central", False):
-        from astroids_gym.policies import CentralCriticPolicy
+        from astroids_gym.policies import CentralCriticPolicy, EntityPolicy
         policy, kwargs["n_actor_inputs"] = CentralCriticPolicy, venv.n_actor_inputs
+        if isinstance(old.policy, EntityPolicy):
+            policy, kwargs["entity_kwargs"] = EntityPolicy, old.policy.entity_kwargs
     model = PPO(policy, venv, n_epochs=old.n_epochs, gamma=old.gamma, gae_lambda=old.gae_lambda,
                 clip_range=0.2, policy_kwargs=kwargs, seed=seed, device="cpu", verbose=0, **hyper)
     old_sd, new_sd = old.policy.state_dict(), model.policy.state_dict()

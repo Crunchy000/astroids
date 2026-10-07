@@ -17,6 +17,8 @@ BEST = "#2a78d6"
 MEDIAN = "#52514e"
 BAND = "#e4e3df"
 FOUNDER_COLORS = ["#2a78d6", "#eb6834", "#1baf7a"]  # categorical slots 1-3 (validated all-pairs)
+START = "#0b0b0b"
+EXPLOIT = "#eb6834"
 
 
 def _style(ax):
@@ -45,7 +47,7 @@ def plot_population(json_path, out_dir=None):
     fcolor = {f: FOUNDER_COLORS[i] if i < len(FOUNDER_COLORS) else "#9a9893" for i, f in enumerate(founders)}
 
     # ---- fitness and network size ----
-    fig, (ax, ax2) = plt.subplots(2, 1, figsize=(8, 6.6), sharex=True, facecolor=SURFACE,
+    fig, (ax, ax2) = plt.subplots(2, 1, figsize=(8, 7.0), sharex=True, facecolor=SURFACE,
                                   gridspec_kw={"height_ratios": [2.2, 1]})
     for a in (ax, ax2):
         _style(a)
@@ -56,8 +58,16 @@ def plot_population(json_path, out_dir=None):
     ax.plot(xs, med, color=MEDIAN, lw=1.5, marker="o", ms=4, zorder=3, label="median member")
     ax.plot(xs, best, color=BEST, lw=2, marker="o", ms=6, mec=SURFACE, mew=2, zorder=4, label="best member")
     ax.axhline(1000, color=TEXT_2, lw=1.5, ls=(0, (5, 4)), zorder=2)
-    ax.annotate("built-in bots 1000", (0, 1000), xytext=(4, 5), textcoords="offset points",
-                xycoords=("axes fraction", "data"), color=TEXT_2, fontsize=9)
+    ax.annotate("built-in bots 1000", (1, 1000), xytext=(-4, -4), textcoords="offset points", ha="right",
+                va="top", xycoords=("axes fraction", "data"), color=TEXT_2, fontsize=9)
+    start = [r["elo"].get("start") for r in rounds]
+    if all(e is not None for e in start):  # the unchanged starting model, re-rated every round
+        ax.plot(xs, start, color=START, lw=1.5, ls=(0, (1, 2.5)), dash_capstyle="round", zorder=2,
+                label="starting model")
+    found = sorted({e["round"] for e in data.get("exploiter_events", []) if e.get("result") == "added to pools"})
+    if found:  # rounds where an exploiter beat the best member: its snapshot joined every pool
+        ax.plot(found, [0.0] * len(found), ls="none", marker="^", ms=7, color=EXPLOIT, clip_on=False, zorder=5,
+                transform=ax.get_xaxis_transform(), label="exploiter beat the best")
     last = rounds[-1]
     top = max(last["members"], key=lambda m: last["elo"][m["id"]])
     ax.annotate(f"{top['id']} ({top['founder']} line) {best[-1]}", (xs[-1], best[-1]), xytext=(8, 0),
@@ -65,12 +75,15 @@ def plot_population(json_path, out_dir=None):
                 bbox={"boxstyle": "round,pad=0.2", "fc": SURFACE, "ec": "none"}, zorder=5)
     for ev in data.get("events", []):  # selection events: thin ticks at the bottom of the panel
         ax.axvline(ev["round"] + 0.5, color=GRID, lw=0.8, zorder=0)
-    lo, hi = min(min(e) for e in elo), max(max(best), 1000)
+    lo = min([min(e) for e in elo] + [e for e in start if e is not None])
+    hi = max(max(best), 1000)
     pad = max(30, (hi - lo) * 0.1)
     ax.set_ylim(lo - pad, hi + pad)
     ax.set_title("Population Elo after each round", loc="left", color=TEXT, fontsize=12, fontweight="bold", pad=8)
-    ax.legend(loc="lower right", bbox_to_anchor=(1.0, 1.0), ncol=3, frameon=False, fontsize=9, labelcolor=TEXT,
-              borderaxespad=0.3)
+    handles, labels = ax.get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", bbox_to_anchor=(0.5, 0.0), ncol=min(len(labels), 3),
+               frameon=False, fontsize=9, labelcolor=TEXT)
+    legend_rows = (len(labels) + 2) // 3
 
     widths = [[m["widths"][0] for m in r["members"]] for r in rounds]
     ax2.plot(xs, [statistics.mean(w) for w in widths], color=BEST, lw=2, marker="o", ms=4, label="mean")
@@ -83,7 +96,7 @@ def plot_population(json_path, out_dir=None):
     ax2.set_xlim(xs[0] - 0.5, xs[-1] + 0.5 + 0.25 * max(len(xs), 4))
     fig.suptitle(f"Population of {data['size']} ({data['rules']} rules): bottom quarter replaced by mutated "
                  "copies of the top quarter at each grey line", x=0.02, ha="left", color=TEXT_2, fontsize=9)
-    fig.tight_layout()
+    fig.tight_layout(rect=(0, 0.035 * legend_rows, 1, 1))
     elo_png = os.path.join(out_dir, "population_elo.png")
     fig.savefig(elo_png, dpi=150, facecolor=SURFACE)
     plt.close(fig)
