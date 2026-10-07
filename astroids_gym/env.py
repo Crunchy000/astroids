@@ -11,7 +11,7 @@ import numpy as np
 from gymnasium import spaces
 
 from .bot import lead, scripted_action
-from .obs import ObsConfig, encode, observation_space
+from .obs import ObsConfig, encode_battle, observation_space
 from .sim import Config, Events, Simulation, wrap_angle
 
 # Policy for ships the learner doesn't control: "scripted" (built-in bot),
@@ -100,7 +100,10 @@ class _Match:
         self.metadata = {**self.metadata, "render_fps": round(1 / (self.cfg.dt * frame_skip))}
 
     def _obs(self, ship_id: int) -> np.ndarray:
-        return encode(self.sim, self.sim.ships[ship_id], self.obs_cfg)
+        return encode_battle(self.sim, [ship_id], self.obs_cfg)[0]
+
+    def _obs_many(self, ship_ids) -> np.ndarray:
+        return encode_battle(self.sim, list(ship_ids), self.obs_cfg)
 
     def _policy_actions(self, policies: dict[int, Policy], rng: np.random.Generator):
         """Decide actions for ships with a non-scripted fixed policy (once per agent step)."""
@@ -117,7 +120,7 @@ class _Match:
                 batches.setdefault(id(pol), (pol, []))[1].append(sid)
         # One call per callable with all its ships' observations stacked.
         for pol, sids in batches.values():
-            acts = np.asarray(pol(np.stack([self._obs(sid) for sid in sids])))
+            acts = np.asarray(pol(self._obs_many(sids)))
             for sid, a in zip(sids, acts.reshape(len(sids), -1)):
                 out[sid] = decode_action(a)
         return out
@@ -263,7 +266,7 @@ class AsteroidsBattleParallelEnv(_Match, _ParallelBase):
         self.agents = list(self.possible_agents)
         if self.render_mode == "human":
             self.render()
-        return ({a: self._obs(i) for a, i in self._ids.items()},
+        return (self._agent_obs(),
                 {a: self._info(i) for a, i in self._ids.items()})
 
     def step(self, actions: dict[str, Any]):
@@ -271,7 +274,7 @@ class AsteroidsBattleParallelEnv(_Match, _ParallelBase):
         ev = self._advance(learner, self.policies, self._rng)
         rewards = self.reward_cfg.rewards(self.sim, ev)
         done = self._steps >= self.max_steps
-        obs = {a: self._obs(i) for a, i in self._ids.items()}
+        obs = self._agent_obs()
         rew = {a: float(rewards[i]) for a, i in self._ids.items()}
         term = {a: False for a in self.agents}
         trunc = {a: done for a in self.agents}
@@ -281,6 +284,11 @@ class AsteroidsBattleParallelEnv(_Match, _ParallelBase):
         if self.render_mode == "human":
             self.render()
         return obs, rew, term, trunc, infos
+
+    def _agent_obs(self) -> dict[str, np.ndarray]:
+        if not self._ids:
+            return {}
+        return dict(zip(self._ids, self._obs_many(self._ids.values())))
 
     def state(self) -> np.ndarray:
         """Global state: every ship's (alive, x, y, vx, vy, sin a, cos a, hp), normalised."""

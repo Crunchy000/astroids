@@ -111,3 +111,22 @@ def encode(sim: Simulation, s: Ship, oc: ObsConfig) -> np.ndarray:
 
     np.clip(out, -1.0, 1.0, out=out)
     return out
+
+
+_fast = None
+
+
+def encode_battle(sim: Simulation, ids, oc: ObsConfig) -> np.ndarray:
+    """Observations for several ships of one battle, shape (len(ids), oc.size).
+
+    Uses the numba-compiled encoder (``fastobs``, ~8x faster) when numba is
+    installed, otherwise ``encode`` per ship. Both give identical results.
+    """
+    global _fast
+    if _fast is None:
+        try:
+            from .fastobs import encode_fast
+            _fast = encode_fast
+        except ImportError:
+            _fast = lambda sim, ids, oc: np.stack([encode(sim, sim.ships[i], oc) for i in ids])  # noqa: E731
+    return _fast(sim, ids, oc)

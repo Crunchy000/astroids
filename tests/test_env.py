@@ -142,3 +142,19 @@ def test_sound_events_and_soundtrack():
     track = render_soundtrack(sim.sfx, sim.time)
     assert track.shape == (int(sim.time * RATE), 2)
     assert 0 < np.abs(track).max() <= 0.8 + 1e-6
+
+
+def test_fast_encoder_matches_reference():
+    pytest.importorskip("numba")
+    from astroids_gym.bot import scripted_action
+    from astroids_gym.fastobs import encode_fast
+    from astroids_gym.obs import ObsConfig, encode
+
+    oc = ObsConfig()
+    sim = Simulation(Config(), seed=5)
+    for step in range(600):
+        sim.step({s.id: scripted_action(sim, s) for s in sim.ships})
+        if step % 20 == 0:
+            ref = np.stack([encode(sim, s, oc) for s in sim.ships])
+            np.testing.assert_array_equal(encode_fast(sim, range(10), oc), ref)
+            np.testing.assert_array_equal(encode_fast(sim, [7, 2], oc), ref[[7, 2]])

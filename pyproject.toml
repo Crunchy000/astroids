@@ -12,10 +12,11 @@ dependencies = ["gymnasium>=0.29", "numpy>=1.24"]
 
 [project.optional-dependencies]
 render = ["pygame>=2.5"]
+fast = ["numba>=0.60"]
 video = ["pygame>=2.5", "imageio[ffmpeg]>=2.30"]
 multiagent = ["pettingzoo>=1.24"]
-train = ["stable-baselines3>=2.3", "torch", "tensorboard", "matplotlib"]
-dev = ["pytest", "pygame>=2.5", "pettingzoo>=1.24"]
+train = ["stable-baselines3>=2.3", "torch", "tensorboard", "matplotlib", "numba>=0.60"]
+dev = ["pytest", "pygame>=2.5", "pettingzoo>=1.24", "numba>=0.60"]
 
 [tool.setuptools]
 packages = ["astroids_gym"]
