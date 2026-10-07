@@ -203,7 +203,25 @@ Training it from scratch would throw away what m16 learned, so `distill.py` firs
 | vs rusher / zone / sniper bots | 95% / 98% / 100% | 90% / 92% / 100% | 75% / 82% / 100% |
 | vs league striker | 90% | 98% | 90% |
 
-Head to head on fresh seeds, the attention model's last three snapshots beat the MLP twin's in 62% of 180 battles (± 4%). Per training sample, attention learns a better policy, especially against the rusher and zone bots that troubled m16. Per hour it is costlier: on 4 CPU cores it trains at about 1,200 samples/s against 4,800 for the MLP, and its NumPy forward pass is about 20 times slower. The model is `results/attention_best.zip`; chart `results/attention_gauntlet.png`; videos: [attention vs m16](results/attention_vs_m16.mp4) · [attention vs bots](results/attention_vs_bots.mp4).
+Head to head on fresh seeds, the attention model's last three snapshots beat the MLP twin's in 62% of 180 battles (± 4%). Per training sample, attention learns a better policy, especially against the rusher and zone bots that troubled m16. Per hour it is costlier: on 4 CPU cores it trains at about 1,200 samples/s against 4,800 for the MLP, and its NumPy forward pass is about 20 times slower. The model is `results/attention_best.zip`; chart `results/gauntlet.png`; videos: [attention vs m16](results/attention_vs_m16.mp4) · [attention vs bots](results/attention_vs_bots.mp4) · [attention vs population v2's best](results/attention_vs_v2.mp4).
+
+### Population v2: the training upgrades on their own
+
+```bash
+python examples/train_population.py --size 10 --exploiters 2 --rounds 8 --tournament-battles 10 \
+    --founders results/population_best.zip:evolved,results/population_best.zip:pack,results/population_best.zip:guardian
+```
+
+Ten MLP team models, all starting from m16 with three reward personalities, trained with all four upgrades for 8 rounds (about 2.5 hours alone on 4 cores; 16 were planned). An exploiter beat the leader once (65% at round 4), and line protection kept one guardian member alive. The gain was small. The best members rated 50 to 100 Elo above the unchanged m16 in their own tournaments, but on the gauntlet:
+
+| Team (40 fresh battles per opponent) | Gauntlet score | vs m16 | vs bots |
+|---|---|---|---|
+| Population v2 best (m17) | 86% | 50% | 92% |
+| Population v2 m00 (m16 itself, retrained) | 85% | 70% | 75% |
+| m16 (start) | 86% | — | 82% |
+| Attention model | **91%** | **70%** | **95%** |
+
+v2's best beat the bots and the rusher style more often than m16, but only broke even against m16 itself. With the same number of training samples per model, the attention model got further, so for these MLP models the network, not the training method, now looks like the limit. Model `results/population_v2_best.zip`; charts `results/population_v2_{elo,lineage}.png`; video: [v2 best vs m16](results/population_v2_vs_m16.mp4) (a near tie, 29.4 to 29.9).
 
 ### Where the training time goes
 

@@ -8,6 +8,7 @@
         "columns": [
           "Opponent (40 fresh battles each)",
           "Attention model",
+          "Population v2 best",
           "MLP twin",
           "m16 (start)"
         ],
@@ -15,18 +16,21 @@
           [
             "Gauntlet score (mean)",
             "91%",
+            "86%",
             "87%",
             "86%"
           ],
           [
             "vs m16",
             "70%",
+            "50%",
             "57%",
             "—"
           ],
           [
             "vs built-in bots",
             "95%",
+            "92%",
             "82%",
             "82%"
           ],
@@ -34,16 +38,19 @@
             "vs rusher bots",
             "95%",
             "90%",
+            "90%",
             "75%"
           ],
           [
             "vs zone bots",
             "98%",
+            "88%",
             "92%",
             "82%"
           ],
           [
             "vs sniper bots",
+            "100%",
             "100%",
             "100%",
             "100%"
@@ -52,6 +59,7 @@
             "vs league striker",
             "90%",
             "98%",
+            "98%",
             "90%"
           ]
         ],
@@ -59,8 +67,8 @@
       },
       "charts": [
         {
-          "src": "results/attention_gauntlet.png",
-          "alt": "Gauntlet win rates with 95% intervals. Attention model: 95% vs bots, 95% vs rusher, 100% vs sniper, 98% vs zone, 90% vs league striker, 70% vs m16. MLP twin: 82, 90, 100, 92, 98 and 57%. m16: 82, 75, 100, 82 and 90%."
+          "src": "results/gauntlet.png",
+          "alt": "Gauntlet win rates with 95% intervals for four teams. Attention model: 95% vs bots, 95% vs rusher, 100% vs sniper, 98% vs zone, 90% vs league striker, 70% vs m16. Population v2 best: 92, 90, 100, 88, 98 and 50%. MLP twin: 82, 90, 100, 92, 98 and 57%. m16: 82, 75, 100, 82 and 90%."
         }
       ],
       "videos": [
@@ -75,6 +83,70 @@
           "title": "Attention model vs the bots",
           "note": "Same seed. Blue (attention) wins by wipe-out at 45 s, 39.1 to 31.2 (m16 won this battle 30.3 to 28.8).",
           "poster": "results/attention_vs_bots.jpg"
+        },
+        {
+          "src": "results/attention_vs_v2.mp4",
+          "title": "Attention model vs population v2's best",
+          "note": "Same seed. Blue (attention) wins by wipe-out at 43 s, 29.1 to 23.6.",
+          "poster": "results/attention_vs_v2.jpg"
+        }
+      ]
+    },
+    {
+      "id": "population_v2",
+      "title": "Population v2: better training, same network",
+      "summary": "Ten team models, all starting from m16 with three reward personalities (evolved, pack, guardian), trained with every upgrade. A critic that sees the whole battle; opponents chosen more often the more they win, including the three bot styles; two exploiters that train only to beat the current leader; and selection that never removes a line's last member. The run stopped after 8 of 16 planned rounds (about 2.5 hours on 4 cores) to free the CPU. An exploiter found a weakness once, at round 4, beating the leader 65% of the time. Line protection kept the guardian line alive in one slot. The gain was small. The best members rated 50 to 100 Elo above the unchanged m16 in their own tournaments. But on fresh battles the best, m17, scored 86% on the gauntlet, the same as m16: it beat the bots (92% vs 82%) and the rusher (90% vs 75%) more often, yet only broke even against m16 itself. With the same number of training samples per model, the attention model reached 91%, so for these MLP models the network, not the training method, now looks like the limit.",
+      "table": {
+        "columns": [
+          "Team (40 fresh battles per opponent)",
+          "Gauntlet score",
+          "vs m16",
+          "vs bots"
+        ],
+        "rows": [
+          [
+            "Population v2 best (m17)",
+            "86%",
+            "50%",
+            "92%"
+          ],
+          [
+            "Population v2 m00 (m16 itself, retrained)",
+            "85%",
+            "70%",
+            "75%"
+          ],
+          [
+            "m16 (start)",
+            "86%",
+            "—",
+            "82%"
+          ],
+          [
+            "Attention model, for comparison",
+            "91%",
+            "70%",
+            "95%"
+          ]
+        ],
+        "highlight": 0
+      },
+      "charts": [
+        {
+          "src": "results/population_v2_elo.png",
+          "alt": "Population v2 Elo over 8 rounds with bots at 1000: the best member rises from about 1250 to 1357 at round 5 and ends at 1258; the median moves between about 1170 and 1290; the unchanged starting model stays between about 1200 and 1260. One exploiter success, at round 4."
+        },
+        {
+          "src": "results/population_v2_lineage.png",
+          "alt": "Lineage of the 10 slots over 8 rounds: the evolved line grows from 4 to 6 slots, the pack line keeps 3, and the guardian line keeps 1 protected slot."
+        }
+      ],
+      "videos": [
+        {
+          "src": "results/population_v2_vs_m16.mp4",
+          "title": "Population v2 best vs m16",
+          "note": "Same seed as the other clips. A near tie: red (m16) wins by wipe-out at 45 s, 29.9 to 29.4.",
+          "poster": "results/population_v2_vs_m16.jpg"
         }
       ]
     },

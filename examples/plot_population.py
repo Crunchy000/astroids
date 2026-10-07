@@ -73,9 +73,10 @@ def plot_population(json_path, out_dir=None):
     ax.annotate(f"{top['id']} ({top['founder']} line) {best[-1]}", (xs[-1], best[-1]), xytext=(8, 0),
                 textcoords="offset points", va="center", color=TEXT, fontsize=9, fontweight="bold",
                 bbox={"boxstyle": "round,pad=0.2", "fc": SURFACE, "ec": "none"}, zorder=5)
-    for ev in data.get("events", []):  # selection events: thin ticks at the bottom of the panel
-        ax.axvline(ev["round"] + 0.5, color=GRID, lw=0.8, zorder=0)
-    lo = min([min(e) for e in elo] + [e for e in start if e is not None])
+    for ev in data.get("events", []):  # selection events (after the last logged round: not shown)
+        if ev["round"] < xs[-1]:
+            ax.axvline(ev["round"] + 0.5, color=GRID, lw=0.8, zorder=0)
+    lo = min([min(e) for e in elo] + [e for e in start if e is not None] + [1000])
     hi = max(max(best), 1000)
     pad = max(30, (hi - lo) * 0.1)
     ax.set_ylim(lo - pad, hi + pad)
