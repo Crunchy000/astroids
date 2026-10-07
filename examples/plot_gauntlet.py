@@ -12,7 +12,7 @@ SURFACE = "#fcfcfb"
 TEXT = "#0b0b0b"
 TEXT_2 = "#52514e"
 GRID = "#e4e3df"
-COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#9a9893"]  # categorical slots 1-3, then neutral grey
+COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#8a5cd1", "#9a9893"]  # categorical slots 1-4, then neutral grey
 
 
 def wilson(p: float, n: int, z: float = 1.96) -> tuple[float, float]:
