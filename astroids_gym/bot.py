@@ -161,25 +161,53 @@ def scripted_action(sim: Simulation, s: Ship, horizon: int = 1, style: str | Non
 
 # Team formations: each ship flies to a slot in a shape centred on its team and
 # facing the objective (the enemy, or the control zone while the enemy is far).
-FORMATIONS = ("wedge", "line", "falsegap")
+FORMATIONS = ("wedge", "line", "falsegap", "echelon", "pincer", "hammer", "circle", "retreat")
 SPACING = 70.0  # px between neighbouring slots
 
 
-def _slot(style: str, k: int, n: int, lure: bool) -> tuple[float, float]:
-    """(forward, left) offset of slot ``k`` of ``n`` from the formation anchor."""
+def _slot(style: str, k: int, n: int, r: float, t: float) -> tuple[float, float]:
+    """(forward, left) offset of slot ``k`` of ``n`` from the formation anchor.
+
+    ``r`` is the nearest enemy's distance from the team's centre in gun ranges and
+    ``t`` the battle time, for the shapes that change as the fight develops.
+    """
     c = k - (n - 1) / 2  # lateral index: -2..2 for five ships
     if style == "wedge":  # leader in front, the rest swept back on both sides
         return -abs(c) * SPACING * 0.9, c * SPACING * 0.8
-    if style == "line":  # shoulder to shoulder
+    if style in ("line", "retreat"):  # shoulder to shoulder
         return 0.0, c * SPACING
-    # False gap: a line with a hole in the middle. When the enemy comes within
-    # range the centre falls back to draw them into the hole, and the flanks push
-    # forward and close in, catching them in a crossfire.
-    if abs(c) < 1.5:
-        side = 0.0 if c == 0 else math.copysign(abs(c) + 0.5, c)
-        return (-1.8 * SPACING if lure else -0.6 * SPACING), side * SPACING
-    side = math.copysign(abs(c) + 0.5, c)
-    return (1.3 * SPACING, side * SPACING * 0.7) if lure else (0.0, side * SPACING)
+    if style == "echelon":  # a diagonal: the left leads, the right is held back (a refused flank)
+        return -c * SPACING * 0.7, c * SPACING * 0.8
+    if style == "falsegap":
+        # A line with a hole in the middle. When the enemy comes within range the
+        # centre falls back to draw them into the hole, and the flanks push forward
+        # and close in, catching them in a crossfire.
+        lure = r < 1.1
+        if abs(c) < 1.5:
+            side = 0.0 if c == 0 else math.copysign(abs(c) + 0.5, c)
+            return (-1.8 * SPACING if lure else -0.6 * SPACING), side * SPACING
+        side = math.copysign(abs(c) + 0.5, c)
+        return (1.3 * SPACING, side * SPACING * 0.7) if lure else (0.0, side * SPACING)
+    if style == "pincer":
+        # Double envelopment: the centre holds while two horns swing wide and close
+        # round both sides of the enemy once they are in reach.
+        if abs(c) < 0.5:
+            return -0.5 * SPACING, 0.0
+        reach = min(r, 1.6) * SPACING * 2.2 if r < 1.4 else 0.0
+        return reach * abs(c) / 2, math.copysign(1.2 + abs(c) * 0.6, c) * SPACING
+    if style == "hammer":
+        # Hammer and anvil: three ships hold a line (the anvil) while the other two
+        # (the hammer) swing out to the right and strike the enemy's flank.
+        if k < n - 2 or n < 3:
+            return 0.0, (k - (min(n, n - 2) - 1) / 2) * SPACING + SPACING * 0.5
+        side = (2.6 + (k - (n - 2)) * 0.7) * SPACING
+        return (min(r, 1.5) * SPACING * 2.4 if r < 1.6 else -SPACING), -side
+    if style == "circle":
+        # Cantabrian circle: the team rides a rotating ring, so every ship keeps
+        # moving and passes the front in turn, firing as it goes.
+        a = 2 * math.pi * k / n + 0.9 * t
+        return 120.0 * math.cos(a), 120.0 * math.sin(a)
+    raise ValueError(f"unknown formation {style!r}")
 
 
 def formation_action(sim: Simulation, s: Ship, horizon: int = 1, style: str = "line") -> Action:
@@ -204,12 +232,24 @@ def formation_action(sim: Simulation, s: Ship, horizon: int = 1, style: str = "l
         ox, oy = math.cos(s.a), math.sin(s.a)
     heading = math.atan2(oy, ox)
     fx, fy = math.cos(heading), math.sin(heading)
-    lure = style == "falsegap" and near < 1.1 * gun_range
+    r = near / gun_range
+    lure = style == "falsegap" and r < 1.1
     cruise = min(math.hypot(ox, oy), 90.0)  # the formation's own speed toward the objective
+    # Feigned retreat: when the enemy comes close, turn and run to draw them out of
+    # shape, then turn on them once they are inside 55% of gun range. The bots keep
+    # no memory, so the feint runs on a clock: for 3 s in every 10 at most.
+    fleeing = style == "retreat" and 0.55 < r < 1.1 and sim.time % 10.0 < 3.0
+    if fleeing:
+        cruise = -110.0
 
     # Slots go left to right in the order the ships already stand, so nobody crosses over.
-    order = sorted(mates, key=lambda o: (-sim.wdx(cx, o.x) * fy + sim.wdy(cy, o.y) * fx, o.id))
-    slots = [_slot(style, k, len(mates), lure) for k in range(len(mates))]
+    if style == "circle":  # ring slots go round in the order the ships stand on the ring
+        order = sorted(mates, key=lambda o: (math.atan2(sim.wdx(cx, o.x) * -fy + sim.wdy(cy, o.y) * fx,
+                                                        sim.wdx(cx, o.x) * fx + sim.wdy(cy, o.y) * fy)
+                                             - 0.9 * sim.time) % (2 * math.pi))
+    else:
+        order = sorted(mates, key=lambda o: (-sim.wdx(cx, o.x) * fy + sim.wdy(cy, o.y) * fx, o.id))
+    slots = [_slot(style, k, len(mates), r, sim.time) for k in range(len(mates))]
     mf = sum(f for f, _ in slots) / len(slots)  # centre the shape on the centre of mass
     fwd, left = slots[order.index(s)]
     fwd -= mf
@@ -236,7 +276,7 @@ def formation_action(sim: Simulation, s: Ship, horizon: int = 1, style: str = "l
         fire = abs(wrap_angle(aim - s.a)) < 0.12 and dist < gun_range * 0.9 and t < cfg.bullet_life
     # A false-gap centre ship falls back while the enemy closes in; once they are
     # inside 60% of gun range the trap is sprung and everyone fights.
-    feint = lure and near > 0.6 * gun_range and fwd < -SPACING and sd > 60
+    feint = (lure and near > 0.6 * gun_range and fwd < -SPACING and sd > 60) or fleeing
     if best is not None and dist < gun_range and not feint:
         # A target in range: turn and shoot, thrusting back toward the slot when facing it.
         desired = aim

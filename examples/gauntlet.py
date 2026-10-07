@@ -5,8 +5,9 @@
 The gauntlet is the default bots, three bot styles that punish different
 weaknesses (``bots:rusher`` charges to point-blank range, ``bots:sniper`` holds
 at long range, ``bots:zone`` sits in the control zone), a hall of fame of
-earlier champions, and three bot teams that fly in formation (``bots:wedge``,
-``bots:line``, ``bots:falsegap``). Every opponent is played on the same seeds
+earlier champions, and the bot teams that fly in formation or use a tactic
+(``bot.FORMATIONS``: wedge, line, false gap, echelon, pincer, hammer and anvil,
+Cantabrian circle, feigned retreat). Every opponent is played on the same seeds
 from both sides.
 The gauntlet score is the mean win rate over all opponents: one number that
 only goes up if a team is better against *everything*, not just the bots.
@@ -21,10 +22,11 @@ os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 
 import numpy as np  # noqa: E402
 
+from astroids_gym.bot import FORMATIONS  # noqa: E402
 from league import play_matches  # noqa: E402
 
 BOT_STYLES = ["bots", "bots:rusher", "bots:sniper", "bots:zone"]
-FORMATION_STYLES = ["bots:wedge", "bots:line", "bots:falsegap"]  # after the hall of fame: seeds stay put
+FORMATION_STYLES = [f"bots:{f}" for f in FORMATIONS]  # after the hall of fame: seeds stay put
 HALL_OF_FAME = {
     "league striker": "results/league_striker.zip",
     "population m16": "results/population_best.zip",
