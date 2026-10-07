@@ -11,9 +11,10 @@ Two rule sets, the same in the browser (press **C** to switch, or `?rules=classi
 
 - **Classic:** endless battle; ships respawn after 3 s; score = kills.
 - **Competitive** (the browser default): 60-second battles with
-  - **Control zone:** the team with more living ships inside the centre circle gains 1 point per second. Score = kills + zone points.
+  - **Control zone:** the team with more living ships inside the centre circle gains 1 point per second, and every 3 zone points earn it an extra respawn (reinforcements). Score = kills + zone points.
   - **Weapon heat:** each shot adds 0.25 heat; at 1.0 the gun locks until it cools to 0.5 (cooling 0.35/s), so bursts are fine but spraying isn't.
-  - **Limited respawns:** 20 per team, 4 s timer. A team wiped out with none left loses outright; otherwise the higher score wins at the buzzer.
+  - **Shorter guns:** 384 px range (bullets live 0.8 s instead of 1.3 s), so the spawns are out of each other's range and teams have to move to fight.
+  - **Limited respawns:** 20 per team (plus zone reinforcements), 4 s timer. A team wiped out with none left loses outright; otherwise the higher score wins at the buzzer.
   - **Friendly fire:** bullets hit teammates (never the shooter).
   - **Fair spawns:** each team spawns in the middle of its own half (at least 0.3 of the map width from the enemy spawn either way, instead of ~0.2 across the wrap seam), facing the zone; a respawning ship takes the safest of 8 candidate points, and spawn protection lasts 2 s. With bots, ships dying within 3 s of respawning fell from 40% to 28%, and zone points per battle rose from ~6 to ~22.
 

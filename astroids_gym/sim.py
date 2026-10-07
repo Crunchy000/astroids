@@ -44,6 +44,7 @@ class Config:
     zone: bool = False  # control zone in the centre; the team with more ships inside scores
     zone_radius: float = 130.0
     zone_rate: float = 1.0  # points per second while holding the zone
+    zone_reinforce_every: float = 0.0  # with team_lives: +1 respawn per this many zone points (0 = off)
     heat: bool = False  # weapon heat: guns lock when overheated
     heat_per_shot: float = 0.25
     heat_cooling: float = 0.35  # per second
@@ -60,7 +61,7 @@ class Config:
     def competitive(cls, **overrides) -> "Config":
         """All four competitive rules on: control zone, heat, limited lives, friendly fire."""
         rules = dict(zone=True, heat=True, team_lives=20, respawn_time=4.0, friendly_fire=True,
-                     spawns="halves", spawn_invuln=2.0)
+                     spawns="halves", spawn_invuln=2.0, bullet_life=0.8, zone_reinforce_every=3.0)
         return cls(**{**rules, **overrides})
 
 
@@ -160,6 +161,7 @@ class Simulation:
         self.score = [0, 0]  # kills
         self.points = [0.0, 0.0]  # control-zone points
         self.lives = [cfg.team_lives, cfg.team_lives]  # respawns left (used when team_lives > 0)
+        self.reinforcements = [0, 0]  # respawns earned from zone points
         self.ships = [Ship(i, i // cfg.team_size) for i in range(self.n_ships)]
         for s in self.ships:
             self._spawn_ship(s)
@@ -344,6 +346,12 @@ class Simulation:
             gain = self.cfg.zone_rate * self.cfg.dt
             self.points[t] += gain
             ev.zone_points[t] += gain
+            every = self.cfg.zone_reinforce_every
+            if every and self.cfg.team_lives:  # holding the zone earns reinforcements
+                earned = int(self.points[t] // every)
+                if earned > self.reinforcements[t]:
+                    self.lives[t] += earned - self.reinforcements[t]
+                    self.reinforcements[t] = earned
 
     def eliminated(self, team: int) -> bool:
         """With limited lives: no ships alive and no respawns left."""

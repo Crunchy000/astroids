@@ -204,3 +204,17 @@ def test_competitive_spawns_are_in_own_half_and_apart():
         assert all(0.65 * w <= s.x <= 0.85 * w for s in sim.ships[5:])
         gap = min(math.hypot(sim.wdx(a.x, b.x), sim.wdy(a.y, b.y)) for a in sim.ships[:5] for b in sim.ships[5:])
         assert gap >= 0.3 * w - 1e-6
+
+
+def test_zone_reinforcements():
+    sim = Simulation(Config.competitive(), seed=0)
+    for s in sim.ships[1:]:
+        s.alive, s.respawn = False, 1e9  # only blue ship 0 is left, parked in the zone
+    me = sim.ships[0]
+    me.x, me.y, me.vx, me.vy = sim.cfg.width / 2, sim.cfg.height / 2, 0.0, 0.0
+    lives = sim.lives[0]
+    for _ in range(int(3.5 / sim.cfg.dt)):  # 3.5 s in the zone = 3.5 points
+        me.vx = me.vy = 0.0
+        sim.step({})
+    assert 3.4 < sim.points[0] < 3.6 and sim.points[1] == 0
+    assert sim.lives[0] == lives + 1 and sim.reinforcements[0] == 1

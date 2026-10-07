@@ -67,6 +67,9 @@
   const ZONE_R = 130, ZONE_RATE = 1;          // points/s for the team with more ships in the zone
   const HEAT_PER_SHOT = 0.25, HEAT_COOL = 0.35, HEAT_RESUME = 0.5;
   const TEAM_LIVES = 20, RESPAWN_COMPETITIVE = 4;
+  const ZONE_REINFORCE_EVERY = 3;                  // +1 respawn per 3 zone points
+  const BULLET_LIFE_COMPETITIVE = 0.8;             // 384 px range instead of 624
+  const bulletLife = () => competitive ? BULLET_LIFE_COMPETITIVE : BULLET_LIFE;
   const params = new URLSearchParams(location.search);
   const TEAMS = [
     { name: 'BLUE', color: '#4cc9f0', glow: 'rgba(76,201,240,0.6)' },
@@ -87,7 +90,7 @@
   let ships, bullets, asteroids, particles, stars, score, paused, speed, asteroidsOn, debug;
   // Competitive-mode state: zone points, respawns left, battle clock, end-of-battle banner.
   let competitive = params.get('rules') !== 'classic';
-  let points, lives, clock, roundOver;
+  let points, lives, reinforcements, clock, roundOver;
 
   // Classic: opposite screen edges (close together across the wrap seam).
   // Competitive: the middle of each team's own half; a respawning ship takes the
@@ -155,7 +158,7 @@
     for (let t = 0; t < 2; t++) for (let i = 0; i < TEAM_SIZE; i++) ships.push(makeShip(t, i));
     bullets = []; particles = [];
     score = [0, 0];
-    points = [0, 0]; lives = [TEAM_LIVES, TEAM_LIVES]; clock = 0; roundOver = null;
+    points = [0, 0]; lives = [TEAM_LIVES, TEAM_LIVES]; reinforcements = [0, 0]; clock = 0; roundOver = null;
     spawnAsteroids();
     stars = [];
     for (let i = 0; i < 160; i++) stars.push({ x: Math.random(), y: Math.random(), b: Math.random() });
@@ -206,7 +209,7 @@
       desired = aimAng;
 
       const err = Math.abs(wrapAngle(aimAng - s.a));
-      if (err < 0.12 && dist < BULLET_SPEED * BULLET_LIFE * 0.9 && t < BULLET_LIFE) fire = true;
+      if (err < 0.12 && dist < BULLET_SPEED * bulletLife() * 0.9 && t < bulletLife()) fire = true;
 
       // Close in if far, back off / strafe if too close.
       const facing = Math.abs(wrapAngle(Math.atan2(dy, dx) - s.a)) < 0.6;
@@ -276,7 +279,7 @@
       bullets.push({
         x: s.x + cx * SHIP_R, y: s.y + cy * SHIP_R,
         vx: s.vx + cx * BULLET_SPEED, vy: s.vy + cy * BULLET_SPEED,
-        life: BULLET_LIFE, team: s.team, owner: s,
+        life: bulletLife(), team: s.team, owner: s,
       });
       sound.shot(s.x, s.team);
     }
@@ -536,7 +539,13 @@
 
     if (competitive) {
       const inside = zoneCounts();
-      if (inside[0] !== inside[1]) points[inside[0] > inside[1] ? 0 : 1] += ZONE_RATE * dt;
+      if (inside[0] !== inside[1]) {
+        const t = inside[0] > inside[1] ? 0 : 1;
+        points[t] += ZONE_RATE * dt;
+        // Holding the zone earns reinforcements: +1 respawn per ZONE_REINFORCE_EVERY points.
+        const earned = Math.floor(points[t] / ZONE_REINFORCE_EVERY);
+        if (earned > reinforcements[t]) { lives[t] += earned - reinforcements[t]; reinforcements[t] = earned; }
+      }
       checkBattleEnd();
     }
     stepParticles(dt);
