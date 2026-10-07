@@ -5,6 +5,19 @@ Two fleets of five triangle ships fight it out in an Asteroids-style arena.
 - **Watch it in the browser:** https://crunchy000.github.io/astorids/ (`index.html`, scripted AI on both sides). It has synthesised sound effects (lasers, hits, explosions, asteroid thuds, panned by position): press any key to start audio, and M to mute.
 - **Train agents in Python:** `astroids_gym`, a [Gymnasium](https://gymnasium.farama.org/) (the maintained successor to OpenAI Gym) and [PettingZoo](https://pettingzoo.farama.org/) port of the same game.
 
+## Rules
+
+Two rule sets, the same in the browser (press **C** to switch, or `?rules=classic`) and in Python (`Config()` / `Config.competitive()`):
+
+- **Classic:** endless battle; ships respawn after 3 s; score = kills.
+- **Competitive** (the browser default): 60-second battles with
+  - **Control zone:** the team with more living ships inside the centre circle gains 1 point per second. Score = kills + zone points.
+  - **Weapon heat:** each shot adds 0.25 heat; at 1.0 the gun locks until it cools to 0.5 (cooling 0.35/s), so bursts are fine but spraying isn't.
+  - **Limited respawns:** 20 per team, 4 s timer. A team wiped out with none left loses outright; otherwise the higher score wins at the buzzer.
+  - **Friendly fire:** bullets hit teammates (never the shooter).
+
+The bots contest the zone when no enemy is near. For agents, `ObsConfig(extended=True)` adds 32 observation inputs for the rules (heat, zone position and control, score lead, respawns and ships left, time remaining, nearby teammates' bullets), and `RewardConfig` has `zone`, `friendly_hit` and `win` terms.
+
 ## Install
 
 ```bash
