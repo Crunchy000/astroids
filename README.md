@@ -119,6 +119,27 @@ One shared policy flies all five blue ships against the scripted red team (param
 
 Starting from `results/ppo_pilot.zip`, `train_team.py` reached a 90% win rate (+9.8 average kill margin) over 40 evaluation battles after 2M ship-steps, and won every evaluation battle from 3M on (+18.8 at 4M), in about 35 minutes on 4 cores. An all-bot blue team wins 50% (−0.8). On 50 battles it had never seen, the 3M model won 98% (+15.4) where the all-bot team won 40% (−1.6). The 4M model is `results/ppo_team.zip`, with the progress chart `results/team_progress.png` and videos of the same battle: [team-trained blue wins 47–27](results/team_trained.mp4) · [all-bot blue loses 34–44](results/team_bots.mp4).
 
+## League: teams of agents vs teams of agents
+
+```bash
+python examples/train_league.py --init results/ppo_team.zip --rounds 12 --bots-share 0.4
+python examples/plot_league.py league/league.json          # Elo chart + who-beats-whom table
+python examples/record_match.py --blue league/models/striker_r12.npz --red bots
+```
+
+`train_league.py` trains several shared-policy team models, each with its own reward personality (`striker`: kills first; `guardian`: survival first; `pack`: fully shared team rewards and the zone). Each round, every member trains against the other members' latest versions, past snapshots and the bots (`--bots-share`), on a random side each battle. A side-swapped round-robin tournament after every round gives Bradley-Terry Elo ratings with the built-in bots fixed at 1000. `--resume` continues a run from its last finished round. It runs at about 11,000 samples/s on 4 cores: battles step in multi-battle worker processes, opponents use NumPy copies of the policy, observations come from the numba encoder, and BLAS is pinned to one thread per process.
+
+Results on the competitive rules (`results/league_*`): 12 rounds of 1M ship-steps per member, about 1.5 hours. All three started from the classic-rules team champion, which the bots beat 98% of the time under the new rules. Its spray-and-camp habit kept its guns overheated 46% of the time, so the league rewards include an overheat penalty and a small shot cost from round 4. After that, the **striker** broke away and finished level with the bots:
+
+| Team (round 12) | Elo (bots = 1000) | vs starting champion |
+|---|---|---|
+| Striker | 988 | +410 |
+| Pack | 617 | +39 |
+| Starting champion | 578 | — |
+| Guardian | 466 | −112 |
+
+On 60 fresh battles the striker won 42% (± 6%) against the bots and 87% against the starting champion. The survival-first guardian ended below where it started. Charts: `results/league_elo.png`, `results/league_matrix.png`; models: `results/league_{striker,pack,guardian}.zip`; videos: [striker vs bots](results/league_striker_vs_bots.mp4) · [striker vs pack](results/league_striker_vs_pack.mp4).
+
 ## Videos
 
 ```bash

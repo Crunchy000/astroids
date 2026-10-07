@@ -93,9 +93,9 @@
       sec.append(el('div', { class: 'table-wrap' },
         el('table', {}, el('thead', {}, head), el('tbody', {}, ...rows))));
     }
-    if (s.chart) {
+    for (const c of s.charts || (s.chart ? [s.chart] : [])) {
       sec.append(el('figure', { class: 'chart' },
-        el('img', { src: s.chart.src, alt: s.chart.alt || '', loading: 'lazy' })));
+        el('img', { src: c.src, alt: c.alt || '', loading: 'lazy' })));
     }
     if (s.videos && s.videos.length) {
       sec.append(el('div', { class: 'grid' }, ...s.videos.map(v =>

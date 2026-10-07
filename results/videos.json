@@ -1,8 +1,72 @@
 {
   "sections": [
     {
+      "id": "league",
+      "title": "Teams of agents vs teams of agents",
+      "summary": "Three team models with different reward personalities (striker: kills first; guardian: survival first; pack: fully shared team rewards and the zone) trained against each other, past snapshots and the bots for 12 rounds, about 1.5 hours on 4 CPU cores, under the competitive rules: control zone with reinforcements, weapon heat, 20 respawns, friendly fire, 384 px guns. All three started from the champion team model, which the bots beat 98% of the time under these rules: its spray-and-camp style kept its guns overheated 46% of the time. After an overheat penalty was added at round 4, the striker broke away and finished level with the bots. On 60 fresh battles it won 42% (± 6%) against the bots and 87% against the starting champion.",
+      "table": {
+        "columns": [
+          "Team (round 12)",
+          "Elo (bots = 1000)",
+          "vs starting champion"
+        ],
+        "rows": [
+          [
+            "Striker",
+            "988",
+            "+410"
+          ],
+          [
+            "Built-in bots",
+            "1000",
+            "+422"
+          ],
+          [
+            "Pack",
+            "617",
+            "+39"
+          ],
+          [
+            "Starting champion",
+            "578",
+            "—"
+          ],
+          [
+            "Guardian",
+            "466",
+            "−112"
+          ]
+        ],
+        "highlight": 0
+      },
+      "charts": [
+        {
+          "src": "results/league_elo.png",
+          "alt": "Elo per league member over 12 rounds with the bots fixed at 1000: the striker climbs from about 700 to 988; pack and guardian hover around the starting champion's 500 to 700."
+        },
+        {
+          "src": "results/league_matrix.png",
+          "alt": "Round 12 win rates: bots and striker are even (48/52%); both beat pack, the champion and the guardian 85 to 98% of the time; pack and the champion are even; the guardian loses to everyone."
+        }
+      ],
+      "videos": [
+        {
+          "src": "results/league_striker_vs_bots.mp4",
+          "title": "League striker vs the bots",
+          "note": "Same battle seed as the other clips. Blue (striker) wins narrowly, 43.7 to 41.6.",
+          "poster": "results/league_striker_vs_bots.jpg"
+        },
+        {
+          "src": "results/league_striker_vs_pack.mp4",
+          "title": "Striker vs pack",
+          "note": "Two league members. Blue (striker) wins 29.6 to 26.9.",
+          "poster": "results/league_striker_vs_pack.jpg"
+        }
+      ]
+    },
+    {
       "id": "team",
-      "title": "A trained team beats the bot team",
+      "title": "A trained team beats the bot team (classic rules)",
       "summary": "One shared PPO policy flies all five blue ships against the built-in bots, each ship getting half of its teammates' kill and death rewards. Starting from the single-seat agent, it won 90% of battles after 2M ship-steps and every evaluation battle from 3M on (about 35 minutes on 4 CPU cores). Checked on 50 battles it had never seen, the 3M model still won 98%.",
       "table": {
         "columns": [
@@ -66,7 +130,7 @@
     },
     {
       "id": "single",
-      "title": "One trained agent among bots",
+      "title": "One trained agent among bots (classic rules)",
       "summary": "A PPO agent flies blue ship 0; the other nine ships are the built-in bot. After 3.5M training steps it beats the bot playing the same seat, on 50 battles it never trained on. On its own it doesn't help a whole team: five copies win about as often as five bots, which is why the team training above was needed.",
       "table": {
         "columns": [

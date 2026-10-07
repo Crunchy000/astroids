@@ -1,0 +1,1465 @@
+{
+ "rules": "competitive",
+ "members": [
+  "striker",
+  "guardian",
+  "pack"
+ ],
+ "personalities": {
+  "striker": {
+   "hit_dealt": 0.3,
+   "hit_taken": -0.1,
+   "zone": 0.1,
+   "win": 3.0,
+   "friendly_hit": -0.3,
+   "kill": 1.5,
+   "death": -0.5,
+   "team_spirit": 0.3
+  },
+  "guardian": {
+   "hit_dealt": 0.2,
+   "hit_taken": -0.4,
+   "zone": 0.15,
+   "win": 3.0,
+   "friendly_hit": -0.5,
+   "kill": 0.8,
+   "death": -1.5,
+   "team_spirit": 0.5
+  },
+  "pack": {
+   "hit_dealt": 0.2,
+   "hit_taken": -0.2,
+   "zone": 0.25,
+   "win": 3.0,
+   "friendly_hit": -0.3,
+   "kill": 1.0,
+   "death": -1.0,
+   "team_spirit": 1.0
+  }
+ },
+ "rounds": [
+  {
+   "round": 1,
+   "training": {
+    "striker": {
+     "samples_per_s": 10952,
+     "win_rate_vs": {
+      "bots": 0.045,
+      "league": 0.622
+     }
+    },
+    "guardian": {
+     "samples_per_s": 11131,
+     "win_rate_vs": {
+      "bots": 0.222,
+      "league": 0.522
+     }
+    },
+    "pack": {
+     "samples_per_s": 10762,
+     "win_rate_vs": {
+      "bots": 0.0,
+      "league": 0.403
+     }
+    }
+   },
+   "elo": {
+    "champion": 1000,
+    "guardian": 977,
+    "pack": 1060,
+    "striker": 1060,
+    "bots": 1356
+   },
+   "matrix": {
+    "striker|guardian": [
+     0.55,
+     2.18
+    ],
+    "guardian|striker": [
+     0.45,
+     -2.18
+    ],
+    "striker|pack": [
+     0.45,
+     1.94
+    ],
+    "pack|striker": [
+     0.55,
+     -1.94
+    ],
+    "striker|champion": [
+     0.65,
+     4.13
+    ],
+    "champion|striker": [
+     0.35,
+     -4.13
+    ],
+    "striker|bots": [
+     0.2,
+     -12.85
+    ],
+    "bots|striker": [
+     0.8,
+     12.85
+    ],
+    "guardian|pack": [
+     0.45,
+     0.01
+    ],
+    "pack|guardian": [
+     0.55,
+     -0.01
+    ],
+    "guardian|champion": [
+     0.35,
+     -0.33
+    ],
+    "champion|guardian": [
+     0.65,
+     0.33
+    ],
+    "guardian|bots": [
+     0.05,
+     -16.65
+    ],
+    "bots|guardian": [
+     0.95,
+     16.65
+    ],
+    "pack|champion": [
+     0.65,
+     2.47
+    ],
+    "champion|pack": [
+     0.35,
+     -2.47
+    ],
+    "pack|bots": [
+     0.1,
+     -15.14
+    ],
+    "bots|pack": [
+     0.9,
+     15.14
+    ],
+    "champion|bots": [
+     0.1,
+     -15.38
+    ],
+    "bots|champion": [
+     0.9,
+     15.38
+    ]
+   }
+  },
+  {
+   "round": 2,
+   "training": {
+    "striker": {
+     "samples_per_s": 11082,
+     "win_rate_vs": {
+      "bots": 0.2,
+      "league": 0.577,
+      "snapshots": 0.708
+     }
+    },
+    "guardian": {
+     "samples_per_s": 10812,
+     "win_rate_vs": {
+      "bots": 0.087,
+      "snapshots": 0.646,
+      "league": 0.531
+     }
+    },
+    "pack": {
+     "samples_per_s": 10940,
+     "win_rate_vs": {
+      "bots": 0.038,
+      "league": 0.451,
+      "snapshots": 0.613
+     }
+    }
+   },
+   "elo": {
+    "champion": 1000,
+    "guardian": 1024,
+    "pack": 1031,
+    "striker": 1123,
+    "bots": 1418
+   },
+   "matrix": {
+    "striker|guardian": [
+     0.7,
+     3.49
+    ],
+    "guardian|striker": [
+     0.3,
+     -3.49
+    ],
+    "striker|pack": [
+     0.55,
+     2.82
+    ],
+    "pack|striker": [
+     0.45,
+     -2.82
+    ],
+    "striker|champion": [
+     0.8,
+     6.37
+    ],
+    "champion|striker": [
+     0.2,
+     -6.37
+    ],
+    "striker|bots": [
+     0.05,
+     -14.3
+    ],
+    "bots|striker": [
+     0.95,
+     14.3
+    ],
+    "guardian|pack": [
+     0.5,
+     0.46
+    ],
+    "pack|guardian": [
+     0.5,
+     -0.46
+    ],
+    "guardian|champion": [
+     0.45,
+     -1.18
+    ],
+    "champion|guardian": [
+     0.55,
+     1.18
+    ],
+    "guardian|bots": [
+     0.2,
+     -13.58
+    ],
+    "bots|guardian": [
+     0.8,
+     13.58
+    ],
+    "pack|champion": [
+     0.5,
+     -0.28
+    ],
+    "champion|pack": [
+     0.5,
+     0.28
+    ],
+    "pack|bots": [
+     0.05,
+     -17.62
+    ],
+    "bots|pack": [
+     0.95,
+     17.62
+    ],
+    "champion|bots": [
+     0.05,
+     -14.38
+    ],
+    "bots|champion": [
+     0.95,
+     14.38
+    ]
+   }
+  },
+  {
+   "round": 3,
+   "training": {
+    "striker": {
+     "samples_per_s": 11416,
+     "win_rate_vs": {
+      "bots": 0.171,
+      "snapshots": 0.553,
+      "league": 0.75
+     }
+    },
+    "guardian": {
+     "samples_per_s": 11883,
+     "win_rate_vs": {
+      "bots": 0.143,
+      "league": 0.375,
+      "snapshots": 0.5
+     }
+    },
+    "pack": {
+     "samples_per_s": 11272,
+     "win_rate_vs": {
+      "bots": 0.0,
+      "league": 0.237,
+      "snapshots": 0.6
+     }
+    }
+   },
+   "bots_share": 0.4,
+   "elo": {
+    "champion": 586,
+    "guardian": 626,
+    "pack": 485,
+    "striker": 690,
+    "bots": 1000
+   },
+   "matrix": {
+    "striker|guardian": [
+     0.6,
+     2.38
+    ],
+    "guardian|striker": [
+     0.4,
+     -2.38
+    ],
+    "striker|pack": [
+     0.85,
+     9.1
+    ],
+    "pack|striker": [
+     0.15,
+     -9.1
+    ],
+    "striker|champion": [
+     0.55,
+     4.47
+    ],
+    "champion|striker": [
+     0.45,
+     -4.47
+    ],
+    "striker|bots": [
+     0.15,
+     -12.15
+    ],
+    "bots|striker": [
+     0.85,
+     12.15
+    ],
+    "guardian|pack": [
+     0.65,
+     2.62
+    ],
+    "pack|guardian": [
+     0.35,
+     -2.62
+    ],
+    "guardian|champion": [
+     0.6,
+     0.79
+    ],
+    "champion|guardian": [
+     0.4,
+     -0.79
+    ],
+    "guardian|bots": [
+     0.1,
+     -15.02
+    ],
+    "bots|guardian": [
+     0.9,
+     15.02
+    ],
+    "pack|champion": [
+     0.4,
+     -1.05
+    ],
+    "champion|pack": [
+     0.6,
+     1.05
+    ],
+    "pack|bots": [
+     0.0,
+     -17.97
+    ],
+    "bots|pack": [
+     1.0,
+     17.97
+    ],
+    "champion|bots": [
+     0.05,
+     -16.83
+    ],
+    "bots|champion": [
+     0.95,
+     16.83
+    ]
+   }
+  },
+  {
+   "round": 4,
+   "training": {
+    "striker": {
+     "samples_per_s": 11341,
+     "win_rate_vs": {
+      "bots": 0.342,
+      "snapshots": 0.696,
+      "league": 0.795
+     }
+    },
+    "guardian": {
+     "samples_per_s": 11976,
+     "win_rate_vs": {
+      "bots": 0.111,
+      "snapshots": 0.476,
+      "league": 0.455
+     }
+    },
+    "pack": {
+     "samples_per_s": 11606,
+     "win_rate_vs": {
+      "bots": 0.103,
+      "league": 0.343,
+      "snapshots": 0.565
+     }
+    }
+   },
+   "bots_share": 0.4,
+   "elo": {
+    "champion": 686,
+    "guardian": 764,
+    "pack": 637,
+    "striker": 895,
+    "bots": 1000
+   },
+   "matrix": {
+    "striker|guardian": [
+     0.8,
+     5.9
+    ],
+    "guardian|striker": [
+     0.2,
+     -5.9
+    ],
+    "striker|pack": [
+     0.7,
+     4.97
+    ],
+    "pack|striker": [
+     0.3,
+     -4.97
+    ],
+    "striker|champion": [
+     0.8,
+     4.1
+    ],
+    "champion|striker": [
+     0.2,
+     -4.1
+    ],
+    "striker|bots": [
+     0.35,
+     -9.77
+    ],
+    "bots|striker": [
+     0.65,
+     9.77
+    ],
+    "guardian|pack": [
+     0.6,
+     3.34
+    ],
+    "pack|guardian": [
+     0.4,
+     -3.34
+    ],
+    "guardian|champion": [
+     0.7,
+     3.56
+    ],
+    "champion|guardian": [
+     0.3,
+     -3.56
+    ],
+    "guardian|bots": [
+     0.3,
+     -13.3
+    ],
+    "bots|guardian": [
+     0.7,
+     13.3
+    ],
+    "pack|champion": [
+     0.3,
+     -4.54
+    ],
+    "champion|pack": [
+     0.7,
+     4.54
+    ],
+    "pack|bots": [
+     0.0,
+     -15.74
+    ],
+    "bots|pack": [
+     1.0,
+     15.74
+    ],
+    "champion|bots": [
+     0.1,
+     -15.4
+    ],
+    "bots|champion": [
+     0.9,
+     15.4
+    ]
+   }
+  },
+  {
+   "round": 5,
+   "training": {
+    "striker": {
+     "samples_per_s": 9732,
+     "win_rate_vs": {
+      "league": 0.895,
+      "bots": 0.395,
+      "snapshots": 0.712
+     }
+    },
+    "guardian": {
+     "samples_per_s": 11164,
+     "win_rate_vs": {
+      "bots": 0.087,
+      "league": 0.324,
+      "snapshots": 0.471
+     }
+    },
+    "pack": {
+     "samples_per_s": 10822,
+     "win_rate_vs": {
+      "bots": 0.162,
+      "snapshots": 0.448,
+      "league": 0.433
+     }
+    }
+   },
+   "bots_share": 0.4,
+   "elo": {
+    "champion": 622,
+    "guardian": 605,
+    "pack": 546,
+    "striker": 819,
+    "bots": 1000
+   },
+   "matrix": {
+    "striker|guardian": [
+     0.85,
+     8.91
+    ],
+    "guardian|striker": [
+     0.15,
+     -8.91
+    ],
+    "striker|pack": [
+     0.85,
+     9.15
+    ],
+    "pack|striker": [
+     0.15,
+     -9.15
+    ],
+    "striker|champion": [
+     0.6,
+     5.58
+    ],
+    "champion|striker": [
+     0.4,
+     -5.58
+    ],
+    "striker|bots": [
+     0.35,
+     -6.82
+    ],
+    "bots|striker": [
+     0.65,
+     6.82
+    ],
+    "guardian|pack": [
+     0.6,
+     1.98
+    ],
+    "pack|guardian": [
+     0.4,
+     -1.98
+    ],
+    "guardian|champion": [
+     0.55,
+     2.51
+    ],
+    "champion|guardian": [
+     0.45,
+     -2.51
+    ],
+    "guardian|bots": [
+     0.05,
+     -18.16
+    ],
+    "bots|guardian": [
+     0.95,
+     18.16
+    ],
+    "pack|champion": [
+     0.45,
+     1.74
+    ],
+    "champion|pack": [
+     0.55,
+     -1.74
+    ],
+    "pack|bots": [
+     0.0,
+     -20.86
+    ],
+    "bots|pack": [
+     1.0,
+     20.86
+    ],
+    "champion|bots": [
+     0.05,
+     -17.98
+    ],
+    "bots|champion": [
+     0.95,
+     17.98
+    ]
+   }
+  },
+  {
+   "round": 6,
+   "training": {
+    "striker": {
+     "samples_per_s": 11768,
+     "win_rate_vs": {
+      "snapshots": 0.692,
+      "bots": 0.262,
+      "league": 0.711
+     }
+    },
+    "guardian": {
+     "samples_per_s": 11819,
+     "win_rate_vs": {
+      "bots": 0.089,
+      "snapshots": 0.556,
+      "league": 0.222
+     }
+    },
+    "pack": {
+     "samples_per_s": 11906,
+     "win_rate_vs": {
+      "bots": 0.083,
+      "league": 0.303,
+      "snapshots": 0.35
+     }
+    }
+   },
+   "bots_share": 0.4,
+   "elo": {
+    "champion": 587,
+    "guardian": 555,
+    "pack": 488,
+    "striker": 896,
+    "bots": 1000
+   },
+   "matrix": {
+    "striker|guardian": [
+     0.825,
+     8.79
+    ],
+    "guardian|striker": [
+     0.175,
+     -8.79
+    ],
+    "striker|pack": [
+     0.85,
+     9.26
+    ],
+    "pack|striker": [
+     0.15,
+     -9.26
+    ],
+    "striker|champion": [
+     0.925,
+     8.93
+    ],
+    "champion|striker": [
+     0.075,
+     -8.93
+    ],
+    "striker|bots": [
+     0.425,
+     -7.86
+    ],
+    "bots|striker": [
+     0.575,
+     7.86
+    ],
+    "guardian|pack": [
+     0.7,
+     0.2
+    ],
+    "pack|guardian": [
+     0.3,
+     -0.2
+    ],
+    "guardian|champion": [
+     0.35,
+     -3.22
+    ],
+    "champion|guardian": [
+     0.65,
+     3.22
+    ],
+    "guardian|bots": [
+     0.0,
+     -16.68
+    ],
+    "bots|guardian": [
+     1.0,
+     16.68
+    ],
+    "pack|champion": [
+     0.4,
+     -1.3
+    ],
+    "champion|pack": [
+     0.6,
+     1.3
+    ],
+    "pack|bots": [
+     0.025,
+     -20.2
+    ],
+    "bots|pack": [
+     0.975,
+     20.2
+    ],
+    "champion|bots": [
+     0.075,
+     -15.83
+    ],
+    "bots|champion": [
+     0.925,
+     15.83
+    ]
+   }
+  },
+  {
+   "round": 7,
+   "training": {
+    "striker": {
+     "samples_per_s": 10777,
+     "win_rate_vs": {
+      "league": 0.886,
+      "bots": 0.286,
+      "snapshots": 0.824
+     }
+    },
+    "guardian": {
+     "samples_per_s": 10883,
+     "win_rate_vs": {
+      "bots": 0.043,
+      "league": 0.324,
+      "snapshots": 0.545
+     }
+    },
+    "pack": {
+     "samples_per_s": 11419,
+     "win_rate_vs": {
+      "bots": 0.048,
+      "league": 0.5,
+      "snapshots": 0.545
+     }
+    }
+   },
+   "bots_share": 0.4,
+   "elo": {
+    "champion": 504,
+    "guardian": 439,
+    "pack": 376,
+    "striker": 729,
+    "bots": 1000
+   },
+   "matrix": {
+    "striker|guardian": [
+     0.925,
+     9.4
+    ],
+    "guardian|striker": [
+     0.075,
+     -9.4
+    ],
+    "striker|pack": [
+     0.85,
+     11.19
+    ],
+    "pack|striker": [
+     0.15,
+     -11.19
+    ],
+    "striker|champion": [
+     0.7,
+     7.09
+    ],
+    "champion|striker": [
+     0.3,
+     -7.09
+    ],
+    "striker|bots": [
+     0.225,
+     -8.18
+    ],
+    "bots|striker": [
+     0.775,
+     8.18
+    ],
+    "guardian|pack": [
+     0.6,
+     2.14
+    ],
+    "pack|guardian": [
+     0.4,
+     -2.14
+    ],
+    "guardian|champion": [
+     0.475,
+     0.6
+    ],
+    "champion|guardian": [
+     0.525,
+     -0.6
+    ],
+    "guardian|bots": [
+     0.025,
+     -16.71
+    ],
+    "bots|guardian": [
+     0.975,
+     16.71
+    ],
+    "pack|champion": [
+     0.3,
+     -3.51
+    ],
+    "champion|pack": [
+     0.7,
+     3.51
+    ],
+    "pack|bots": [
+     0.0,
+     -21.41
+    ],
+    "bots|pack": [
+     1.0,
+     21.41
+    ],
+    "champion|bots": [
+     0.0,
+     -16.03
+    ],
+    "bots|champion": [
+     1.0,
+     16.03
+    ]
+   }
+  },
+  {
+   "round": 8,
+   "training": {
+    "striker": {
+     "samples_per_s": 11317,
+     "win_rate_vs": {
+      "bots": 0.348,
+      "league": 0.867,
+      "snapshots": 0.593
+     }
+    },
+    "guardian": {
+     "samples_per_s": 10977,
+     "win_rate_vs": {
+      "bots": 0.022,
+      "league": 0.436,
+      "snapshots": 0.647
+     }
+    },
+    "pack": {
+     "samples_per_s": 11020,
+     "win_rate_vs": {
+      "bots": 0.065,
+      "league": 0.213,
+      "snapshots": 0.333
+     }
+    }
+   },
+   "bots_share": 0.4,
+   "elo": {
+    "champion": 593,
+    "guardian": 514,
+    "pack": 459,
+    "striker": 762,
+    "bots": 1000
+   },
+   "matrix": {
+    "striker|guardian": [
+     0.75,
+     6.95
+    ],
+    "guardian|striker": [
+     0.25,
+     -6.95
+    ],
+    "striker|pack": [
+     0.925,
+     11.88
+    ],
+    "pack|striker": [
+     0.075,
+     -11.88
+    ],
+    "striker|champion": [
+     0.725,
+     6.4
+    ],
+    "champion|striker": [
+     0.275,
+     -6.4
+    ],
+    "striker|bots": [
+     0.2,
+     -8.34
+    ],
+    "bots|striker": [
+     0.8,
+     8.34
+    ],
+    "guardian|pack": [
+     0.5,
+     0.36
+    ],
+    "pack|guardian": [
+     0.5,
+     -0.36
+    ],
+    "guardian|champion": [
+     0.425,
+     -3.23
+    ],
+    "champion|guardian": [
+     0.575,
+     3.23
+    ],
+    "guardian|bots": [
+     0.025,
+     -17.96
+    ],
+    "bots|guardian": [
+     0.975,
+     17.96
+    ],
+    "pack|champion": [
+     0.325,
+     -4.73
+    ],
+    "champion|pack": [
+     0.675,
+     4.73
+    ],
+    "pack|bots": [
+     0.0,
+     -20.95
+    ],
+    "bots|pack": [
+     1.0,
+     20.95
+    ],
+    "champion|bots": [
+     0.125,
+     -15.71
+    ],
+    "bots|champion": [
+     0.875,
+     15.71
+    ]
+   }
+  },
+  {
+   "round": 9,
+   "training": {
+    "striker": {
+     "samples_per_s": 11275,
+     "win_rate_vs": {
+      "bots": 0.467,
+      "league": 0.875,
+      "snapshots": 0.812
+     }
+    },
+    "guardian": {
+     "samples_per_s": 10628,
+     "win_rate_vs": {
+      "bots": 0.077,
+      "league": 0.5,
+      "snapshots": 0.375
+     }
+    },
+    "pack": {
+     "samples_per_s": 10773,
+     "win_rate_vs": {
+      "league": 0.359,
+      "snapshots": 0.444,
+      "bots": 0.021
+     }
+    }
+   },
+   "bots_share": 0.4,
+   "elo": {
+    "champion": 461,
+    "guardian": 394,
+    "pack": 334,
+    "striker": 730,
+    "bots": 1000
+   },
+   "matrix": {
+    "striker|guardian": [
+     0.85,
+     10.21
+    ],
+    "guardian|striker": [
+     0.15,
+     -10.21
+    ],
+    "striker|pack": [
+     1.0,
+     14.77
+    ],
+    "pack|striker": [
+     0.0,
+     -14.77
+    ],
+    "striker|champion": [
+     0.775,
+     7.47
+    ],
+    "champion|striker": [
+     0.225,
+     -7.47
+    ],
+    "striker|bots": [
+     0.175,
+     -7.62
+    ],
+    "bots|striker": [
+     0.825,
+     7.62
+    ],
+    "guardian|pack": [
+     0.475,
+     -0.5
+    ],
+    "pack|guardian": [
+     0.525,
+     0.5
+    ],
+    "guardian|champion": [
+     0.475,
+     0.51
+    ],
+    "champion|guardian": [
+     0.525,
+     -0.51
+    ],
+    "guardian|bots": [
+     0.025,
+     -19.47
+    ],
+    "bots|guardian": [
+     0.975,
+     19.47
+    ],
+    "pack|champion": [
+     0.3,
+     -4.14
+    ],
+    "champion|pack": [
+     0.7,
+     4.14
+    ],
+    "pack|bots": [
+     0.0,
+     -21.96
+    ],
+    "bots|pack": [
+     1.0,
+     21.96
+    ],
+    "champion|bots": [
+     0.025,
+     -16.42
+    ],
+    "bots|champion": [
+     0.975,
+     16.42
+    ]
+   }
+  },
+  {
+   "round": 10,
+   "training": {
+    "striker": {
+     "samples_per_s": 11337,
+     "win_rate_vs": {
+      "bots": 0.49,
+      "league": 0.92,
+      "snapshots": 0.75
+     }
+    },
+    "guardian": {
+     "samples_per_s": 11190,
+     "win_rate_vs": {
+      "bots": 0.064,
+      "league": 0.235,
+      "snapshots": 0.562
+     }
+    },
+    "pack": {
+     "samples_per_s": 11163,
+     "win_rate_vs": {
+      "bots": 0.109,
+      "league": 0.212,
+      "snapshots": 0.346
+     }
+    }
+   },
+   "bots_share": 0.4,
+   "elo": {
+    "champion": 494,
+    "guardian": 525,
+    "pack": 504,
+    "striker": 870,
+    "bots": 1000
+   },
+   "matrix": {
+    "striker|guardian": [
+     0.863,
+     10.73
+    ],
+    "guardian|striker": [
+     0.138,
+     -10.73
+    ],
+    "striker|pack": [
+     0.925,
+     10.98
+    ],
+    "pack|striker": [
+     0.075,
+     -10.98
+    ],
+    "striker|champion": [
+     0.85,
+     10.37
+    ],
+    "champion|striker": [
+     0.15,
+     -10.37
+    ],
+    "striker|bots": [
+     0.375,
+     -6.71
+    ],
+    "bots|striker": [
+     0.625,
+     6.71
+    ],
+    "guardian|pack": [
+     0.525,
+     0.7
+    ],
+    "pack|guardian": [
+     0.475,
+     -0.7
+    ],
+    "guardian|champion": [
+     0.575,
+     -0.44
+    ],
+    "champion|guardian": [
+     0.425,
+     0.44
+    ],
+    "guardian|bots": [
+     0.0,
+     -17.54
+    ],
+    "bots|guardian": [
+     1.0,
+     17.54
+    ],
+    "pack|champion": [
+     0.525,
+     -0.41
+    ],
+    "champion|pack": [
+     0.475,
+     0.41
+    ],
+    "pack|bots": [
+     0.05,
+     -17.91
+    ],
+    "bots|pack": [
+     0.95,
+     17.91
+    ],
+    "champion|bots": [
+     0.025,
+     -16.2
+    ],
+    "bots|champion": [
+     0.975,
+     16.2
+    ]
+   }
+  },
+  {
+   "round": 11,
+   "training": {
+    "striker": {
+     "samples_per_s": 11432,
+     "win_rate_vs": {
+      "snapshots": 0.793,
+      "league": 0.837,
+      "bots": 0.475
+     }
+    },
+    "guardian": {
+     "samples_per_s": 8400,
+     "win_rate_vs": {
+      "bots": 0.058,
+      "league": 0.371,
+      "snapshots": 0.3
+     }
+    },
+    "pack": {
+     "samples_per_s": 11699,
+     "win_rate_vs": {
+      "bots": 0.154,
+      "league": 0.359,
+      "snapshots": 0.614
+     }
+    }
+   },
+   "bots_share": 0.4,
+   "elo": {
+    "champion": 573,
+    "guardian": 501,
+    "pack": 473,
+    "striker": 796,
+    "bots": 1000
+   },
+   "matrix": {
+    "striker|guardian": [
+     0.875,
+     12.94
+    ],
+    "guardian|striker": [
+     0.125,
+     -12.94
+    ],
+    "striker|pack": [
+     0.925,
+     11.83
+    ],
+    "pack|striker": [
+     0.075,
+     -11.83
+    ],
+    "striker|champion": [
+     0.675,
+     6.21
+    ],
+    "champion|striker": [
+     0.325,
+     -6.21
+    ],
+    "striker|bots": [
+     0.275,
+     -7.78
+    ],
+    "bots|striker": [
+     0.725,
+     7.78
+    ],
+    "guardian|pack": [
+     0.5,
+     -0.42
+    ],
+    "pack|guardian": [
+     0.5,
+     0.42
+    ],
+    "guardian|champion": [
+     0.475,
+     -1.6
+    ],
+    "champion|guardian": [
+     0.525,
+     1.6
+    ],
+    "guardian|bots": [
+     0.025,
+     -18.87
+    ],
+    "bots|guardian": [
+     0.975,
+     18.87
+    ],
+    "pack|champion": [
+     0.375,
+     -3.53
+    ],
+    "champion|pack": [
+     0.625,
+     3.53
+    ],
+    "pack|bots": [
+     0.025,
+     -17.38
+    ],
+    "bots|pack": [
+     0.975,
+     17.38
+    ],
+    "champion|bots": [
+     0.05,
+     -16.42
+    ],
+    "bots|champion": [
+     0.95,
+     16.42
+    ]
+   }
+  },
+  {
+   "round": 12,
+   "training": {
+    "striker": {
+     "samples_per_s": 11501,
+     "win_rate_vs": {
+      "league": 0.915,
+      "bots": 0.51,
+      "snapshots": 0.607
+     }
+    },
+    "guardian": {
+     "samples_per_s": 11423,
+     "win_rate_vs": {
+      "bots": 0.0,
+      "league": 0.2,
+      "snapshots": 0.5
+     }
+    },
+    "pack": {
+     "samples_per_s": 11082,
+     "win_rate_vs": {
+      "league": 0.429,
+      "bots": 0.171,
+      "snapshots": 0.625
+     }
+    }
+   },
+   "bots_share": 0.4,
+   "elo": {
+    "champion": 578,
+    "guardian": 466,
+    "pack": 617,
+    "striker": 988,
+    "bots": 1000
+   },
+   "matrix": {
+    "striker|guardian": [
+     0.975,
+     15.79
+    ],
+    "guardian|striker": [
+     0.025,
+     -15.79
+    ],
+    "striker|pack": [
+     0.85,
+     10.86
+    ],
+    "pack|striker": [
+     0.15,
+     -10.86
+    ],
+    "striker|champion": [
+     0.925,
+     10.22
+    ],
+    "champion|striker": [
+     0.075,
+     -10.22
+    ],
+    "striker|bots": [
+     0.525,
+     -1.85
+    ],
+    "bots|striker": [
+     0.475,
+     1.85
+    ],
+    "guardian|pack": [
+     0.275,
+     -3.74
+    ],
+    "pack|guardian": [
+     0.725,
+     3.74
+    ],
+    "guardian|champion": [
+     0.375,
+     -2.96
+    ],
+    "champion|guardian": [
+     0.625,
+     2.96
+    ],
+    "guardian|bots": [
+     0.025,
+     -20.54
+    ],
+    "bots|guardian": [
+     0.975,
+     20.54
+    ],
+    "pack|champion": [
+     0.5,
+     0.56
+    ],
+    "champion|pack": [
+     0.5,
+     -0.56
+    ],
+    "pack|bots": [
+     0.075,
+     -16.24
+    ],
+    "bots|pack": [
+     0.925,
+     16.24
+    ],
+    "champion|bots": [
+     0.05,
+     -16.14
+    ],
+    "bots|champion": [
+     0.95,
+     16.14
+    ]
+   }
+  }
+ ]
+}
