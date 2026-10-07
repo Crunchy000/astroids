@@ -3,41 +3,57 @@
     {
       "id": "team",
       "title": "A trained team beats the bot team",
-      "summary": "One shared PPO policy flies all five blue ships against the built-in bots, each ship getting half of its teammates' kill and death rewards. It started from the single-seat agent; after 2M ship-steps of team training (under 20 minutes on 4 CPU cores) it wins 90% of battles. Training is still running; a check on battles it was never evaluated on will follow.",
+      "summary": "One shared PPO policy flies all five blue ships against the built-in bots, each ship getting half of its teammates' kill and death rewards. Starting from the single-seat agent, it won 90% of battles after 2M ship-steps and every evaluation battle from 3M on (about 35 minutes on 4 CPU cores). Checked on 50 battles it had never seen, the 3M model still won 98%.",
       "table": {
         "columns": [
           "Blue team flown by",
           "Win rate",
-          "Avg kill margin"
+          "Avg kill margin",
+          "Battles"
         ],
         "rows": [
           [
-            "Team-trained PPO (2M ship-steps)",
-            "90%",
-            "+9.8"
+            "Team-trained PPO (4M ship-steps)",
+            "100%",
+            "+18.8",
+            "40 evaluation"
+          ],
+          [
+            "Team-trained PPO (3M), unseen battles",
+            "98%",
+            "+15.4",
+            "50 new"
+          ],
+          [
+            "Built-in bots, same unseen battles",
+            "40%",
+            "−1.6",
+            "50 new"
           ],
           [
             "Single-seat agent, before team training",
             "45%",
-            "−0.8"
+            "−0.8",
+            "40 evaluation"
           ],
           [
             "Built-in bots",
             "50%",
-            "−0.8"
+            "−0.8",
+            "40 evaluation"
           ]
         ],
         "highlight": 0
       },
       "chart": {
         "src": "results/team_progress.png",
-        "alt": "Team training progress: blue's win rate climbs from 45% to 90% and its average kill margin from -0.8 to +9.8 within 2M ship-steps; the all-bot team sits at 50% and -0.8."
+        "alt": "Team training progress: blue's win rate climbs from 45% to 100% and its average kill margin from -0.8 to +18.8 over 4M ship-steps; the all-bot team sits at 50% and -0.8."
       },
       "videos": [
         {
           "src": "results/team_trained.mp4",
-          "title": "Team-trained agent flying all of blue",
-          "note": "Same battle as the other clips. Blue wins 42–29.",
+          "title": "Team-trained agent (4M) flying all of blue",
+          "note": "Same battle as the other clips. Blue wins 47–27 (the 2M model won 42–29).",
           "poster": "results/team_trained.jpg"
         },
         {
