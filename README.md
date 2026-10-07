@@ -15,6 +15,7 @@ Two rule sets, the same in the browser (press **C** to switch, or `?rules=classi
   - **Weapon heat:** each shot adds 0.25 heat; at 1.0 the gun locks until it cools to 0.5 (cooling 0.35/s), so bursts are fine but spraying isn't.
   - **Limited respawns:** 20 per team, 4 s timer. A team wiped out with none left loses outright; otherwise the higher score wins at the buzzer.
   - **Friendly fire:** bullets hit teammates (never the shooter).
+  - **Fair spawns:** each team spawns in the middle of its own half (at least 0.3 of the map width from the enemy spawn either way, instead of ~0.2 across the wrap seam), facing the zone; a respawning ship takes the safest of 8 candidate points, and spawn protection lasts 2 s. With bots, ships dying within 3 s of respawning fell from 40% to 28%, and zone points per battle rose from ~6 to ~22.
 
 The bots contest the zone when no enemy is near. For agents, `ObsConfig(extended=True)` adds 32 observation inputs for the rules (heat, zone position and control, score lead, respawns and ships left, time remaining, nearby teammates' bullets), and `RewardConfig` has `zone`, `friendly_hit` and `win` terms.
 

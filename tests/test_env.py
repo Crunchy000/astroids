@@ -192,3 +192,15 @@ def test_competitive_parallel_env_ends_and_pays_win_reward():
         steps += 1
     assert all(term.values()) and steps < 1800  # random blue, 1 respawn: wiped out early
     assert env.sim.winner() == 1 and all(r <= -5.0 + 1.0 for r in rew.values())
+
+
+def test_competitive_spawns_are_in_own_half_and_apart():
+    import math
+
+    for seed in range(10):
+        sim = Simulation(Config.competitive(), seed=seed)
+        w = sim.cfg.width
+        assert all(0.15 * w <= s.x <= 0.35 * w for s in sim.ships[:5])
+        assert all(0.65 * w <= s.x <= 0.85 * w for s in sim.ships[5:])
+        gap = min(math.hypot(sim.wdx(a.x, b.x), sim.wdy(a.y, b.y)) for a in sim.ships[:5] for b in sim.ships[5:])
+        assert gap >= 0.3 * w - 1e-6

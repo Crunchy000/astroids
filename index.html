@@ -89,9 +89,25 @@
   let competitive = params.get('rules') !== 'classic';
   let points, lives, clock, roundOver;
 
-  function spawnPoint(team) {
-    const x = team === 0 ? rand(W * 0.05, W * 0.2) : rand(W * 0.8, W * 0.95);
-    return { x, y: rand(H * 0.15, H * 0.85) };
+  // Classic: opposite screen edges (close together across the wrap seam).
+  // Competitive: the middle of each team's own half; a respawning ship takes the
+  // safest of 8 candidate points (farthest from the nearest living enemy).
+  function spawnPoint(team, respawn) {
+    if (!competitive) {
+      const x = team === 0 ? rand(W * 0.05, W * 0.2) : rand(W * 0.8, W * 0.95);
+      return { x, y: rand(H * 0.15, H * 0.85) };
+    }
+    const [lo, hi] = team === 0 ? [0.15, 0.35] : [0.65, 0.85];
+    const pt = () => ({ x: rand(W * lo, W * hi), y: rand(H * 0.15, H * 0.85) });
+    const enemies = respawn ? ships.filter(o => o.team !== team && o.alive) : [];
+    if (!enemies.length) return pt();
+    let best = null, bestD = -1;
+    for (let k = 0; k < 8; k++) {
+      const p = pt();
+      const d = Math.min(...enemies.map(o => wdx(p.x, o.x) ** 2 + wdy(p.y, o.y) ** 2));
+      if (d > bestD) { bestD = d; best = p; }
+    }
+    return best;
   }
 
   function makeShip(team, i) {
@@ -100,12 +116,12 @@
     return s;
   }
 
-  function resetShip(s) {
-    const p = spawnPoint(s.team);
+  function resetShip(s, respawn = false) {
+    const p = spawnPoint(s.team, respawn);
     s.x = p.x; s.y = p.y; s.vx = 0; s.vy = 0;
     s.a = s.team === 0 ? 0 : Math.PI;
     s.hp = SHIP_HP; s.cool = rand(0, FIRE_COOLDOWN);
-    s.alive = true; s.thrusting = false; s.target = null; s.invuln = 1.5;
+    s.alive = true; s.thrusting = false; s.target = null; s.invuln = competitive ? 2.0 : 1.5;
     s.heat = 0; s.overheated = false;
     s.wander = rand(-1, 1);
     // A little personality so the fleets don't move in lockstep.
@@ -127,8 +143,10 @@
     asteroids = [];
     if (!asteroidsOn) return;
     for (let i = 0; i < ASTEROID_COUNT; i++) {
-      // keep them toward the middle so spawns are safe
-      asteroids.push(makeAsteroid(rand(W * 0.3, W * 0.7), rand(0, H), Math.random() < 0.5 ? 3 : 2));
+      // keep them away from the spawns: the middle band (classic), or between the bases (competitive)
+      const x = competitive ? (rand(-0.1, 0.1) * W + (Math.random() < 0.5 ? W / 2 : 0) + W) % W
+                            : rand(W * 0.3, W * 0.7);
+      asteroids.push(makeAsteroid(x, rand(0, H), Math.random() < 0.5 ? 3 : 2));
     }
   }
 
@@ -414,7 +432,7 @@
             if (lives[s.team] <= 0) continue;  // out of respawns: stays dead
             lives[s.team]--;
           }
-          resetShip(s);
+          resetShip(s, true);
         }
         continue;
       }

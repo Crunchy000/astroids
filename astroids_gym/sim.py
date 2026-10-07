@@ -50,11 +50,17 @@ class Config:
     heat_resume: float = 0.5  # an overheated gun fires again once cooled to this
     team_lives: int = 0  # respawns per team (0 = unlimited); a wiped-out team with none left loses
     friendly_fire: bool = False  # bullets hit teammates (never the shooter)
+    # "edges": the original layout, teams on opposite screen edges (only ~0.2 W apart
+    # across the wrap seam). "halves": each team spawns in the middle of its own half,
+    # at least 0.3 W from the enemy spawn in either direction, facing the centre; a
+    # respawning ship takes the safest of 8 candidate points (farthest from enemies).
+    spawns: str = "edges"
 
     @classmethod
     def competitive(cls, **overrides) -> "Config":
         """All four competitive rules on: control zone, heat, limited lives, friendly fire."""
-        rules = dict(zone=True, heat=True, team_lives=20, respawn_time=4.0, friendly_fire=True)
+        rules = dict(zone=True, heat=True, team_lives=20, respawn_time=4.0, friendly_fire=True,
+                     spawns="halves", spawn_invuln=2.0)
         return cls(**{**rules, **overrides})
 
 
@@ -161,19 +167,33 @@ class Simulation:
         self.asteroids: list[Asteroid] = []
         if cfg.asteroids:
             for _ in range(cfg.asteroid_count):
+                if cfg.spawns == "halves":
+                    # Between the bases: around the centre or around the wrap seam.
+                    x = self.rand(-0.1, 0.1) * cfg.width + (cfg.width / 2 if self.rng.random() < 0.5 else 0.0)
+                    x %= cfg.width
+                else:
+                    x = self.rand(cfg.width * 0.3, cfg.width * 0.7)
                 self.asteroids.append(self._make_asteroid(
-                    self.rand(cfg.width * 0.3, cfg.width * 0.7),
-                    self.rand(0, cfg.height),
-                    3 if self.rng.random() < 0.5 else 2,
+                    x, self.rand(0, cfg.height), 3 if self.rng.random() < 0.5 else 2,
                 ))
 
-    def _spawn_ship(self, s: Ship) -> None:
+    def _spawn_ship(self, s: Ship, respawn: bool = False) -> None:
         cfg = self.cfg
-        if s.team == 0:
-            s.x = self.rand(cfg.width * 0.05, cfg.width * 0.2)
+        lo, hi = (0.15, 0.35) if cfg.spawns == "halves" else (0.05, 0.2)
+        if s.team == 1:
+            lo, hi = 1 - hi, 1 - lo
+
+        def point():
+            return self.rand(cfg.width * lo, cfg.width * hi), self.rand(cfg.height * 0.15, cfg.height * 0.85)
+
+        enemies = [o for o in self.ships if o.team != s.team and o.alive]
+        if respawn and cfg.spawns == "halves" and enemies:
+            # Safe respawn: the candidate farthest from its nearest living enemy.
+            def safety(p):
+                return min(self.wdx(p[0], o.x) ** 2 + self.wdy(p[1], o.y) ** 2 for o in enemies)
+            s.x, s.y = max((point() for _ in range(8)), key=safety)
         else:
-            s.x = self.rand(cfg.width * 0.8, cfg.width * 0.95)
-        s.y = self.rand(cfg.height * 0.15, cfg.height * 0.85)
+            s.x, s.y = point()
         s.vx = s.vy = 0.0
         s.a = 0.0 if s.team == 0 else math.pi
         s.hp = cfg.ship_hp
@@ -257,7 +277,7 @@ class Simulation:
                         if self.lives[s.team] <= 0:
                             continue  # out of lives: stays dead
                         self.lives[s.team] -= 1
-                    self._spawn_ship(s)
+                    self._spawn_ship(s, respawn=True)
                 continue
             s.cool -= dt
             s.invuln -= dt
