@@ -142,13 +142,26 @@ def main():
     p.add_argument("--out", default="population")
     p.add_argument("--resume", action="store_true")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--device", default="auto", help="torch device for training: auto (a GPU if there is one), cuda, cpu")
+    p.add_argument("--inference", choices=["auto", "main", "workers"], default="auto",
+                   help="where frozen opponents and tournament players run: in this process on --device "
+                        "(best with a GPU), or as NumPy in the worker processes (best on CPU only); auto picks")
     args = p.parse_args()
+
+    device = ("cuda" if torch.cuda.is_available() else "cpu") if args.device == "auto" else args.device
+    inference = args.inference if args.inference != "auto" else ("main" if device != "cpu" else "workers")
+    bank = None
+    if inference == "main":
+        from astroids_gym.policies import PolicyBank
+        bank = PolicyBank(device)
+    print(f"training on {device}; opponents and tournaments run in the "
+          f"{'main process' if bank else 'worker processes'}; {args.n_workers} workers", flush=True)
 
     torch.set_num_threads(1)
     rng = np.random.default_rng(args.seed)
     os.makedirs(f"{args.out}/models", exist_ok=True)
     venv = LeagueVecEnv(args.n_workers, args.battles_per_worker, seed=args.seed, rules=args.rules,
-                        central=args.critic == "central")
+                        central=args.critic == "central", bank=bank)
     base_hyper = {"n_steps": args.n_steps, "batch_size": args.n_steps * venv.num_envs // 4}
     bots = BOT_SPECS if args.sampling == "pfsp" else ["bots"]
 
@@ -156,7 +169,7 @@ def main():
         return {**base_hyper, "learning_rate": g["lr"], "ent_coef": g["ent_coef"]}
 
     def load(zip_path, g):
-        return PPO.load(zip_path, env=venv, custom_objects=hyper(g), device="cpu")
+        return PPO.load(zip_path, env=venv, custom_objects=hyper(g), device=device)
 
     def save(member, rnd):
         path = f"{args.out}/models/{member['id']}_r{rnd}"
@@ -199,7 +212,7 @@ def main():
             changes = []
             if i >= len(founders):  # founders themselves stay unmutated
                 genome, changes = mutate(genome, rng, args.p_grow, args.max_width)
-            model = grow_model(founder_model, venv, hyper(genome), args.seed + i, genome["widths"])
+            model = grow_model(founder_model, venv, hyper(genome), args.seed + i, genome["widths"], device)
             members.append({"id": f"m{next_id:02d}", "founder": personality, "parent": None, "born": 0,
                             "genome": genome, "mutations": changes, "model": model})
             next_id += 1
@@ -268,6 +281,9 @@ def main():
                 kinds.setdefault(kind, []).append((o + 1) / 2)
             log["training"][m["id"]] = {"samples_per_s": round(rate),
                                         "win_rate_vs": {k: round(float(np.mean(v)), 3) for k, v in kinds.items()}}
+            wins = [w for v in kinds.values() for w in v]
+            print(f"  {m['id']} trained: {rate:,.0f} samples/s, won {np.mean(wins) if wins else 0:.0%} "
+                  f"of {len(wins)} training battles", flush=True)
             save(m, rnd)
             snapshots.append(m["latest"])
 
@@ -279,7 +295,7 @@ def main():
             save(x, rnd)
             x["tries"] += 1
             check = tournament([x["latest"], best["latest"]], 40, seed=900_000 + 1000 * rnd + 100 * i,
-                               workers=args.n_workers, rules=args.rules)
+                               workers=args.n_workers, rules=args.rules, bank=bank)
             win = float(np.mean([(o * (1 if a == x["latest"] else -1) + 1) / 2 for a, _, _, _, o in check]))
             remember(best["id"], [(x["latest"], o * (1 if b == x["latest"] else -1)) for a, b, _, _, o in check])
             event = {"round": rnd, "exploiter": x["id"], "target": best["id"], "win": round(win, 3),
@@ -298,7 +314,7 @@ def main():
 
         players = [m["latest"] for m in members] + [start, "bots"]
         results = tournament(players, args.tournament_battles, seed=10_000 * rnd, workers=args.n_workers,
-                             rules=args.rules)
+                             rules=args.rules, bank=bank)
         name = {m["latest"]: m["id"] for m in members} | {start: "start", "bots": "bots"}
         for m in members:  # tournament results go into each member's record too
             remember(m["id"], [(b if a == m["latest"] else a, o if a == m["latest"] else -o)
@@ -329,7 +345,7 @@ def main():
                 genome, changes = mutate(parent["genome"], rng, args.p_grow, args.max_width)
                 model = load(parent["latest_zip"], genome)
                 if genome["widths"] != parent["genome"]["widths"]:
-                    model = grow_model(model, venv, hyper(genome), args.seed + next_id, genome["widths"])
+                    model = grow_model(model, venv, hyper(genome), args.seed + next_id, genome["widths"], device)
                 child = {"id": f"m{next_id:02d}", "founder": parent["founder"], "parent": parent["id"],
                          "born": rnd, "genome": genome, "mutations": changes, "model": model}
                 next_id += 1

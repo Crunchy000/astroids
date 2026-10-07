@@ -161,7 +161,15 @@ def battle_over(b: Battle) -> tuple[bool, bool]:
     return eliminated or b.steps >= MAX_STEPS or b.sim.over, eliminated
 
 
-def _worker(remote, seed: int, n_battles: int, rules: str = "classic", central: bool = False):
+def _worker(remote, seed: int, n_battles: int, rules: str = "classic", central: bool = False,
+            remote_policies: bool = False):
+    """Training battles for ``LeagueVecEnv``.
+
+    With ``remote_policies`` the worker never runs a network: each reply also
+    carries the frozen opponents' observations ({spec: obs}), and the next
+    "step" command brings their actions back, computed in the main process
+    (``PolicyBank``, e.g. on a GPU). The scripted bots always run here.
+    """
     rng = np.random.default_rng(seed)
     cfg, oc = make_rules(rules)
 
@@ -183,25 +191,38 @@ def _worker(remote, seed: int, n_battles: int, rules: str = "classic", central: 
         b.opp = specs[rng.choice(len(specs), p=np.array(weights) / sum(weights))]
         return b
 
+    def by_spec():
+        groups = defaultdict(list)
+        for k, b in enumerate(battles):
+            groups[b.opp].append(k)
+        return groups
+
+    def opponent_requests():
+        """{spec: observations} of the network-flown opponents, in ``by_spec`` order."""
+        return {spec: np.concatenate([battles[k].obs(1 - battles[k].side, oc) for k in ks])
+                for spec, ks in by_spec().items() if not spec.startswith("bots")}
+
     battles = [new_battle() for _ in range(n_battles)]
     while True:
         cmd, data = remote.recv()
         if cmd == "step":
+            if remote_policies:
+                data, given = data
             acts_per = np.split(data, n_battles)
             # Opponent moves: one batched forward pass per distinct policy across battles.
             opp_acts: dict[int, dict] = {}
-            by_spec = defaultdict(list)
-            for k, b in enumerate(battles):
-                by_spec[b.opp].append(k)
-            for spec, ks in by_spec.items():
+            for spec, ks in by_spec().items():
                 if spec.startswith("bots"):
                     for k in ks:
                         opp_acts[k] = battles[k].team_actions(1 - battles[k].side, spec, oc)
+                    continue
+                if remote_policies:
+                    acts = np.split(given[spec], len(ks))
                 else:
                     obs = np.concatenate([battles[k].obs(1 - battles[k].side, oc) for k in ks])
                     acts = np.split(_policy(spec)(obs, rng), len(ks))
-                    for k, a in zip(ks, acts):
-                        opp_acts[k] = battles[k].team_actions(1 - battles[k].side, spec, oc, actions=a)
+                for k, a in zip(ks, acts):
+                    opp_acts[k] = battles[k].team_actions(1 - battles[k].side, spec, oc, actions=a)
             obs_out, rew_out, done_out, final_out, results = [], [], [], [], []
             for k, b in enumerate(battles):
                 acts = {**opp_acts[k], **b.team_actions(b.side, "", oc, actions=acts_per[k])}
@@ -223,10 +244,12 @@ def _worker(remote, seed: int, n_battles: int, rules: str = "classic", central: 
                     battles[k] = b = new_battle()
                     o = learner_obs(b)
                 obs_out.append(o)
-            remote.send((np.concatenate(obs_out), np.concatenate(rew_out), done_out, final_out, results))
+            reply = (np.concatenate(obs_out), np.concatenate(rew_out), done_out, final_out, results)
+            remote.send(reply + (opponent_requests(),) if remote_policies else reply)
         elif cmd == "reset":
             battles = [new_battle() for _ in range(n_battles)]
-            remote.send(np.concatenate([learner_obs(b) for b in battles]))
+            obs = np.concatenate([learner_obs(b) for b in battles])
+            remote.send((obs, opponent_requests()) if remote_policies else obs)
         elif cmd == "configure":
             if "reward" in data:
                 reward = RewardConfig(**data["reward"])
@@ -255,17 +278,92 @@ def play_match(args) -> tuple[str, str, float, float, int]:
     return a, b, sim.team_score(0), sim.team_score(1), 0 if w < 0 else (1 if w == 0 else -1)
 
 
+def _match_worker(remote, jobs: list[tuple[str, str, int, str]]):
+    """Plays ``jobs`` side by side; the networks run in the main process (see ``play_matches``).
+
+    Each round it sends ("need", {spec: obs}) for every network-flown team still
+    playing, gets {spec: actions} back, and steps; finally ("done", results).
+    """
+    cfg, oc = make_rules(jobs[0][3])
+    battles = [Battle(seed, cfg) for _, _, seed, _ in jobs]
+    live = list(range(len(jobs)))
+    while live:
+        teams = defaultdict(list)  # spec -> [(battle, team)]
+        for k in live:
+            for team, spec in enumerate(jobs[k][:2]):
+                if not spec.startswith("bots"):
+                    teams[spec].append((k, team))
+        remote.send(("need", {spec: np.concatenate([battles[k].obs(t, oc) for k, t in kt])
+                              for spec, kt in teams.items()}))
+        given = remote.recv()
+        acts = {k: {} for k in live}
+        for spec, kt in teams.items():
+            for (k, t), a in zip(kt, np.split(given[spec], len(kt))):
+                acts[k] |= battles[k].team_actions(t, spec, oc, actions=a)
+        for k in live:
+            for team, spec in enumerate(jobs[k][:2]):
+                if spec.startswith("bots"):
+                    acts[k] |= battles[k].team_actions(team, spec, oc)
+            battles[k].step(acts[k])
+        live = [k for k in live if not battle_over(battles[k])[0]]
+    out = []
+    for (a, b, _, _), battle in zip(jobs, battles):
+        sim, w = battle.sim, battle.sim.winner()
+        out.append((a, b, sim.team_score(0), sim.team_score(1), 0 if w < 0 else (1 if w == 0 else -1)))
+    remote.send(("done", out))
+
+
+def play_matches(jobs: list[tuple[str, str, int, str]], workers: int = 4, bank=None) -> list:
+    """``play_match`` for every job, in order.
+
+    Without ``bank``: a process pool, one battle per task, NumPy policies. With a
+    ``policies.PolicyBank`` (e.g. on a GPU): ``workers`` processes each simulate
+    their share of battles side by side, and every network runs in this process,
+    batched across all battles. Both give the same results (greedy actions).
+    """
+    ctx = mp.get_context("forkserver" if "forkserver" in mp.get_all_start_methods() else "spawn")
+    if bank is None:
+        with ctx.Pool(workers) as pool:
+            return pool.map(play_match, jobs, chunksize=1)
+    shares = [list(range(len(jobs)))[w::workers] for w in range(workers)]
+    shares = [s for s in shares if s]
+    pipes, procs = [], []
+    for share in shares:
+        local, remote = ctx.Pipe()
+        p = ctx.Process(target=_match_worker, args=(remote, [jobs[i] for i in share]), daemon=True)
+        p.start()
+        remote.close()
+        pipes.append(local)
+        procs.append(p)
+    results = [None] * len(jobs)
+    msgs = [pipe.recv() for pipe in pipes]
+    active = list(range(len(pipes)))
+    while active:
+        need = [w for w in active if msgs[w][0] == "need"]
+        for w in active:
+            if msgs[w][0] == "done":
+                for i, r in zip(shares[w], msgs[w][1]):
+                    results[i] = r
+        acts = bank.act_grouped([msgs[w][1] for w in need], sample=False)
+        for w, a in zip(need, acts):
+            pipes[w].send(a)
+        active = need
+        for w in active:
+            msgs[w] = pipes[w].recv()
+    for p in procs:
+        p.join(timeout=5)
+    return results
+
+
 def tournament(players: list[str], battles_per_pair: int = 10, seed: int = 0, workers: int = 4,
-               rules: str = "classic"):
+               rules: str = "classic", bank=None):
     """Round-robin; each pair plays half its battles on each side, on the same seeds."""
     jobs = []
     for i, (a, b) in enumerate(combinations(players, 2)):
         for n in range(battles_per_pair):
             s = seed + 1000 * i + n // 2
             jobs.append((a, b, s, rules) if n % 2 == 0 else (b, a, s, rules))
-    ctx = mp.get_context("forkserver" if "forkserver" in mp.get_all_start_methods() else "spawn")
-    with ctx.Pool(workers) as pool:
-        return pool.map(play_match, jobs, chunksize=1)
+    return play_matches(jobs, workers, bank)
 
 
 def fit_elo(results, anchor: str, anchor_elo: float = 1000.0, iters: int = 500) -> dict[str, float]:

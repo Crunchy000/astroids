@@ -19,7 +19,7 @@ os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 
 import numpy as np  # noqa: E402
 
-from league import play_match  # noqa: E402
+from league import play_matches  # noqa: E402
 
 BOT_STYLES = ["bots", "bots:rusher", "bots:sniper", "bots:zone"]
 HALL_OF_FAME = {
@@ -38,9 +38,11 @@ def as_spec(path: str, tmp: str) -> str:
 
 
 def gauntlet(team: str, opponents: dict[str, str], battles: int = 20, seed: int = 500_000,
-             workers: int = 4, rules: str = "competitive") -> dict[str, tuple[float, float]]:
-    """{opponent name: (team's win rate, mean score margin)}; draws count half."""
-    import multiprocessing as mp
+             workers: int = 4, rules: str = "competitive", bank=None) -> dict[str, tuple[float, float]]:
+    """{opponent name: (team's win rate, mean score margin)}; draws count half.
+
+    With ``bank`` (``policies.PolicyBank``) the networks run batched in this process, e.g. on a GPU.
+    """
     jobs, names = [], []
     for k, (name, spec) in enumerate(opponents.items()):
         if spec == team:
@@ -49,9 +51,7 @@ def gauntlet(team: str, opponents: dict[str, str], battles: int = 20, seed: int 
             s = seed + 1000 * k + n // 2
             jobs.append((team, spec, s, rules) if n % 2 == 0 else (spec, team, s, rules))
             names.append(name)
-    ctx = mp.get_context("forkserver" if "forkserver" in mp.get_all_start_methods() else "spawn")
-    with ctx.Pool(workers) as pool:
-        results = pool.map(play_match, jobs, chunksize=1)
+    results = play_matches(jobs, workers, bank)
     out = {}
     for name in dict.fromkeys(names):
         wins, margins = [], []
@@ -73,7 +73,14 @@ def main():
     p.add_argument("--seed", type=int, default=500_000)
     p.add_argument("--names", help="comma-separated display names for the teams (for --json)")
     p.add_argument("--json", help="also write the results here (for plot_gauntlet.py)")
+    p.add_argument("--workers", type=int, default=os.cpu_count())
+    p.add_argument("--device", help="run the networks batched in this process on this torch device "
+                                    "(e.g. cuda); default: NumPy in worker processes")
     args = p.parse_args()
+    bank = None
+    if args.device:
+        from astroids_gym.policies import PolicyBank
+        bank = PolicyBank(args.device)
     names = args.names.split(",") if args.names else [os.path.basename(t) for t in args.teams]
     report = {"battles": args.battles, "teams": {}}
 
@@ -82,7 +89,7 @@ def main():
         opponents = {s: s for s in BOT_STYLES} | {n: as_spec(h, tmp) for n, h in hof.items() if os.path.exists(h)}
         for team, display in zip(args.teams, names):
             spec = as_spec(team, tmp)
-            res = gauntlet(spec, opponents, args.battles, args.seed)
+            res = gauntlet(spec, opponents, args.battles, args.seed, args.workers, bank=bank)
             score = np.mean([w for w, _ in res.values()])
             print(f"\n{team}: gauntlet score {score:.0%} ({args.battles} battles per opponent)")
             for name, (w, m) in res.items():

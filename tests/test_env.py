@@ -299,3 +299,39 @@ def test_entity_policy_numpy_export_matches_torch(tmp_path):
     for a, b in zip(np.split(ref, [5, 7], 1), np.split(out, [5, 7], 1)):
         pa, pb = np.exp(a - a.max(1, keepdims=True)), np.exp(b - b.max(1, keepdims=True))
         assert np.allclose(pa / pa.sum(1, keepdims=True), pb / pb.sum(1, keepdims=True), atol=1e-5)
+
+
+def test_policy_bank_matches_numpy_and_tournaments_agree(tmp_path):
+    pytest.importorskip("stable_baselines3")
+    import sys
+    from gymnasium import spaces
+    from stable_baselines3.common.policies import ActorCriticPolicy
+
+    from astroids_gym import ACTION_SPACE
+    from astroids_gym.obs import ObsConfig
+    from astroids_gym.policies import EntityPolicy, PolicyBank
+
+    sys.path.insert(0, "examples")
+    from league import NumpyPolicy, export_policy, play_matches
+
+    oc = ObsConfig(extended=True)
+    box = spaces.Box(-1, 1, (oc.size,), np.float32)
+
+    class M:
+        pass
+
+    specs = []
+    for name, pol in (("mlp", ActorCriticPolicy(box, ACTION_SPACE, lambda _: 1e-3, net_arch=[32, 32])),
+                      ("ent", EntityPolicy(box, ACTION_SPACE, lambda _: 1e-3, net_arch=[32, 32], n_actor_inputs=oc.size,
+                                           entity_kwargs={"d": 16, "heads": 2}))):
+        M.policy = pol
+        specs.append(export_policy(M, str(tmp_path / f"{name}.npz")))
+    bank = PolicyBank("cpu")
+    rng = np.random.default_rng(0)
+    x = (rng.random((64, oc.size), dtype=np.float32) * 2 - 1)
+    x[:, 8:58:10] = rng.random((64, 5)) > 0.3  # enemy "present" flags
+    for spec in specs:
+        assert np.allclose(NumpyPolicy(spec).logits(x), bank.logits(spec, x), atol=1e-4)
+        assert (NumpyPolicy(spec)(x) == bank.act(spec, x, sample=False)).all()
+    jobs = [(specs[0], "bots", 11, "competitive"), ("bots:rusher", specs[0], 12, "competitive")]
+    assert play_matches(jobs, workers=2) == play_matches(jobs, workers=2, bank=bank)

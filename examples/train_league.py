@@ -67,18 +67,23 @@ class LeagueVecEnv(VecEnv):
 
     With ``central=True`` each observation is followed by the global battle
     state, for ``CentralCriticPolicy`` (``n_actor_inputs`` is the plain size).
+    With a ``bank`` (``policies.PolicyBank``, e.g. on a GPU) the frozen opponents
+    run in this process, one batched pass per opponent across all workers, and
+    the workers only simulate.
     """
 
     def __init__(self, n_workers: int = 4, battles_per_worker: int = 4, seed: int = 0,
-                 rules: str = "classic", central: bool = False):
+                 rules: str = "classic", central: bool = False, bank=None):
         self.team_size = Config().team_size
+        self.bank = bank
+        self._requests: list[dict] = [{} for _ in range(n_workers)]
         self.per_worker = battles_per_worker * self.team_size
         ctx = mp.get_context("forkserver" if "forkserver" in mp.get_all_start_methods() else "spawn")
         self.remotes, self.procs = [], []
         for i in range(n_workers):
             local, remote = ctx.Pipe()
-            p = ctx.Process(target=_worker, args=(remote, seed + 1000 * i, battles_per_worker, rules, central),
-                            daemon=True)
+            p = ctx.Process(target=_worker, args=(remote, seed + 1000 * i, battles_per_worker, rules, central,
+                                                  bank is not None), daemon=True)
             p.start()
             remote.close()
             self.remotes.append(local)
@@ -106,14 +111,22 @@ class LeagueVecEnv(VecEnv):
             r.send(("reset", None))
         self.ep_ret[:] = 0
         self.ep_len[:] = 0
-        return np.concatenate([r.recv() for r in self.remotes])
+        out = [r.recv() for r in self.remotes]
+        if self.bank is None:
+            return np.concatenate(out)
+        self._requests = [o[1] for o in out]
+        return np.concatenate([o[0] for o in out])
 
     def step_async(self, actions):
+        given = self.bank.act_grouped(self._requests, sample=True) if self.bank is not None else None
         for i, r in enumerate(self.remotes):
-            r.send(("step", actions[i * self.per_worker:(i + 1) * self.per_worker]))
+            acts = actions[i * self.per_worker:(i + 1) * self.per_worker]
+            r.send(("step", acts if given is None else (acts, given[i])))
 
     def step_wait(self):
         out = [r.recv() for r in self.remotes]
+        if self.bank is not None:
+            self._requests = [o[5] for o in out]
         obs = np.concatenate([o[0] for o in out])
         rew = np.concatenate([o[1] for o in out])
         battle_done = [d for o in out for d in o[2]]
@@ -184,7 +197,8 @@ def net_widths(model) -> list[int]:
     return [sd[f"mlp_extractor.policy_net.{i}.weight"].shape[0] for i in idx]
 
 
-def grow_model(old: PPO, venv, hyper: dict, seed: int, widths: list[int] | None = None) -> PPO:
+def grow_model(old: PPO, venv, hyper: dict, seed: int, widths: list[int] | None = None,
+               device: str = "cpu") -> PPO:
     """A new PPO for ``venv`` that behaves exactly like ``old``, possibly bigger.
 
     Handles more observation inputs (the competitive rules' extra features, or
@@ -205,8 +219,9 @@ def grow_model(old: PPO, venv, hyper: dict, seed: int, widths: list[int] | None 
         if isinstance(old.policy, EntityPolicy):
             policy, kwargs["entity_kwargs"] = EntityPolicy, old.policy.entity_kwargs
     model = PPO(policy, venv, n_epochs=old.n_epochs, gamma=old.gamma, gae_lambda=old.gae_lambda,
-                clip_range=0.2, policy_kwargs=kwargs, seed=seed, device="cpu", verbose=0, **hyper)
-    old_sd, new_sd = old.policy.state_dict(), model.policy.state_dict()
+                clip_range=0.2, policy_kwargs=kwargs, seed=seed, device=device, verbose=0, **hyper)
+    old_sd = {k: v.to(model.device) for k, v in old.policy.state_dict().items()}
+    new_sd = model.policy.state_dict()
     for k, v in new_sd.items():
         o = old_sd[k]
         if o.shape == v.shape:

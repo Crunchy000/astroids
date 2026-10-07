@@ -223,6 +223,14 @@ Ten MLP team models, all starting from m16 with three reward personalities, trai
 
 v2's best beat the bots and the rusher style more often than m16, but only broke even against m16 itself. With the same number of training samples per model, the attention model got further, so for these MLP models the network, not the training method, now looks like the limit. Model `results/population_v2_best.zip`; charts `results/population_v2_{elo,lineage}.png`; video: [v2 best vs m16](results/population_v2_vs_m16.mp4) (a near tie, 29.4 to 29.9).
 
+### Train on a GPU (Google Colab)
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Crunchy000/astorids/blob/ccr-ccbf1ca0-erm5dw/colab/train_on_colab.ipynb)
+
+`colab/train_on_colab.ipynb` trains a population of attention-model teams on a Colab GPU: pick a GPU runtime and *Run all*. It saves every round to Google Drive, so after a disconnect *Run all* carries on from the last finished round. Then it scores the best member on the gauntlet, records a video, and can push the results to a `colab-results` branch (with a GitHub token stored as a Colab secret).
+
+On a GPU, `train_population.py --device auto` trains there, and `--inference main` (the default with a GPU) runs every network in the main process. That covers the frozen opponents and tournament players, batched across all battles (`policies.PolicyBank`, `league.play_matches`), so the CPU worker processes only simulate battles. This matters because Colab gives 2 CPU cores, and an attention opponent costs ~8 ms per batch in NumPy. Tournament results are identical either way (tested). `gauntlet.py --device cuda` does the same for evaluation.
+
 ### Where the training time goes
 
 On this 4-core CPU with the centralised critic, one PPO iteration splits about 49% PPO update, 29% battle simulation and 22% network inference. The collision checks and the scripted bot were sped up without changing any result: 12 full battles of trajectories and 288k bot actions are bit-identical, and the physics step is about 1.4x faster. That only saves about 5% end to end. The network maths is now the bottleneck, so a GPU (or fewer PPO epochs) is where a big speed-up would come from.
