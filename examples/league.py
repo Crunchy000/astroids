@@ -106,8 +106,9 @@ class Battle:
     def team_actions(self, team: int, spec: str, oc: ObsConfig, rng=None, actions=None) -> dict:
         """Actions for one team flown by ``spec`` ("bots" or a .npz policy), or given ``actions``."""
         sim = self.sim
-        if actions is None and spec == "bots":
-            return {i: scripted_action(sim, sim.ships[i], FRAME_SKIP) for i in self.ids[team]}
+        if actions is None and spec.startswith("bots"):  # "bots" or "bots:<style>"
+            style = spec.split(":", 1)[1] if ":" in spec else None
+            return {i: scripted_action(sim, sim.ships[i], FRAME_SKIP, style) for i in self.ids[team]}
         if actions is None:
             actions = _policy(spec)(self.obs(team, oc), rng)
         return {i: decode_action(a) for i, a in zip(self.ids[team], actions)}
@@ -158,9 +159,9 @@ def _worker(remote, seed: int, n_battles: int, rules: str = "classic"):
             for k, b in enumerate(battles):
                 by_spec[b.opp].append(k)
             for spec, ks in by_spec.items():
-                if spec == "bots":
+                if spec.startswith("bots"):
                     for k in ks:
-                        opp_acts[k] = battles[k].team_actions(1 - battles[k].side, "bots", oc)
+                        opp_acts[k] = battles[k].team_actions(1 - battles[k].side, spec, oc)
                 else:
                     obs = np.concatenate([battles[k].obs(1 - battles[k].side, oc) for k in ks])
                     acts = np.split(_policy(spec)(obs, rng), len(ks))

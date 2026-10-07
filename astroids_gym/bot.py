@@ -30,11 +30,19 @@ def lead(sim: Simulation, s: Ship, target: Ship) -> tuple[float, float, float, f
     return math.atan2(dy + rvy * t, dx + rvx * t), t, dx, dy
 
 
-def scripted_action(sim: Simulation, s: Ship, horizon: int = 1) -> Action:
+STYLES = ("rusher", "sniper", "zone")
+
+
+def scripted_action(sim: Simulation, s: Ship, horizon: int = 1, style: str | None = None) -> Action:
     """Chase the nearest enemy, lead shots, dodge bullets and asteroids.
 
     ``horizon`` is how many physics ticks the action will be held for; the turn
     command is scaled so the ship doesn't overshoot its desired heading.
+
+    ``style`` gives the bot a distinct way of fighting (used for evaluation
+    gauntlets): ``"rusher"`` closes to point-blank range and never breaks off,
+    ``"sniper"`` holds at 60-90% of gun range and backs away from anything
+    closer, ``"zone"`` sits in the control zone and only fights what comes near.
     """
     cfg = sim.cfg
     if not s.alive:
@@ -69,17 +77,34 @@ def scripted_action(sim: Simulation, s: Ship, horizon: int = 1) -> Action:
             # break off, then come back around
             desired = math.atan2(dy, dx) + math.pi * 0.6 * (1 if s.wander >= 0 else -1)
             thrust = abs(wrap_angle(desired - s.a)) < 0.8
+
+        gun_range = cfg.bullet_speed * cfg.bullet_life
+        if style == "rusher":  # straight at them, no breaking off
+            desired = aim
+            thrust = facing and dist > 60
+        elif style == "sniper":  # keep them at long range
+            if dist < 0.6 * gun_range:
+                desired = math.atan2(-dy, -dx)
+                thrust = abs(wrap_angle(desired - s.a)) < 0.8
+            else:
+                desired = aim
+                thrust = facing and dist > 0.9 * gun_range
     else:
         s.wander += sim.rand(-1, 1) * cfg.dt * horizon
         desired = s.a + s.wander
 
     # Control zone: with no enemy close by, go and hold the centre.
-    if cfg.zone and (best is None or best_d > 380):
+    engage = 250 if style == "zone" else 380
+    if cfg.zone and (best is None or best_d > engage):
         zx, zy = sim.wdx(s.x, cfg.width / 2), sim.wdy(s.y, cfg.height / 2)
         zd = math.hypot(zx, zy)
         if zd > cfg.zone_radius * 0.5:
             desired = math.atan2(zy, zx)
             thrust = abs(wrap_angle(desired - s.a)) < 0.5 and math.hypot(s.vx, s.vy) < 150
+        elif style == "zone":  # inside: hold position, keep aiming at whoever is nearest
+            thrust = False
+            if best is not None:
+                desired = aim
         fire = fire and best is not None
 
     # Dodge enemy bullets heading our way and nearby asteroids.
