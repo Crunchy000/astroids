@@ -172,7 +172,7 @@ python examples/gauntlet.py results/attention_best.zip results/population_best.z
 python examples/plot_gauntlet.py g.json --out gauntlet.png
 ```
 
-Elo inside one population only says who beats whom *there*. The gauntlet scores a team against fixed, varied opponents on fresh battle seeds, from both sides: the default bots; three bot styles that punish different weaknesses (`bots:rusher` charges to point-blank range, `bots:sniper` holds at long range, `bots:zone` sits in the control zone); a hall of fame (league striker, m16, the attention model and Colab m08; a team never plays itself); and three bot teams that fly in formation (`bots:wedge`, `bots:line`, `bots:falsegap`, below). The gauntlet score is the mean win rate, so it only goes up if a team gets better against everything. The scores published up to and including the first Colab run used the original two-model hall of fame (league striker, m16) and no formation bots.
+Elo inside one population only says who beats whom *there*. The gauntlet scores a team against fixed, varied opponents on fresh battle seeds, from both sides: the default bots; three bot styles that punish different weaknesses (`bots:rusher` charges to point-blank range, `bots:sniper` holds at long range, `bots:zone` sits in the control zone); a hall of fame (league striker, m16, the attention model and Colab m08; a team never plays itself); and twelve bot teams that fly a formation or a tactic (below). The gauntlet score is the mean win rate, so it only goes up if a team gets better against everything. The scores published up to and including the first Colab run used the original two-model hall of fame (league striker, m16) and no formation bots.
 
 ### Training upgrades
 
@@ -248,27 +248,63 @@ Six attention-model teams, all starting from the attention model with three rewa
 
 Head to head on 100 fresh battles, m08 beat the attention model it started from 66% of the time, though by a small average margin (+1.7 points per battle). Model `results/colab_population_best.zip`; charts `results/gauntlet.png`, `results/colab_population_{elo,lineage}.png`; video: [m08 vs the attention model](results/colab_best_vs_attention.mp4) (one of the battles m08 loses, 25.8 to 26.1).
 
-### Formation bots: wedge, line and false gap
+### Formations and tactics for the bots
 
 ```bash
-python examples/record_match.py --blue bots:wedge --red bots --out wedge.mp4
+python examples/record_match.py --blue bots:pincer --red bots --out pincer.mp4
 ```
 
-Three new scripted bot styles fly as a team (`astroids_gym/bot.py`, `formation_action`). Each ship takes a slot in a shape centred on its team's centre of mass and facing the objective (the control zone while the enemy is far, then the enemy). Slots go left to right in the order the ships already stand, so nobody crosses over, and each ship holds station by thrusting along its velocity error, turning round to brake. With a target in range a ship turns and shoots, and thrusts back toward its slot when it happens to face it.
+Fifteen new scripted bot styles (`astroids_gym/bot.py`), all chosen with `scripted_action(..., style=...)` or as `bots:<style>` wherever a team is named.
 
-* **`bots:wedge`**: a leader in front, the others swept back on both sides.
-* **`bots:line`**: shoulder to shoulder, 70 px apart.
-* **`bots:falsegap`**: a line with a hole in the middle. When the enemy comes within range, the centre falls back to draw them into the hole while the flanks push forward and close in. Once the enemy is inside 60% of gun range, everyone fights.
+**Formations and team tactics** (`FORMATIONS`, `formation_action`). Each ship takes a slot in a shape centred on its team's centre of mass and facing the objective: the control zone while the enemy is far, then the enemy. Slots go left to right in the order the ships already stand, so nobody crosses over. Each ship holds station by thrusting along its velocity error, turning round to brake. With a target in range a ship turns and shoots, and thrusts back toward its slot when it happens to face it.
 
-The arena is small, so the shapes mostly show on the approach and when a team regroups: contact comes about 2 to 3 seconds after the start, and then it turns into a close fight. Even so, flying together pays off. Against the other bots (40 battles each, from both sides):
+* **Wedge**: a leader in front, the others swept back on both sides.
+* **Line**: shoulder to shoulder, 70 px apart.
+* **Echelon**: a diagonal line; one side leads and the other is held back (a refused flank).
+* **Finger four**: the fingertips of a hand seen from above. The leader is in front, its wingman back on one side, the second element back on the other, and the fifth ship trails.
+* **False gap**: a line with a hole in the middle. When the enemy comes within range, the centre falls back to draw them in while the flanks push forward and close. Once the enemy is inside 60% of gun range, everyone fights.
+* **Pincer** (double envelopment): the centre holds while two horns swing wide and close round both sides of the enemy.
+* **Hammer and anvil**: three ships hold a line while the other two swing out to one side and strike the enemy's flank.
+* **Cantabrian circle**: the team rides a rotating ring toward the enemy, so every ship keeps moving and passes the front in turn.
+* **Lufbery circle**: a defensive rotating ring held over the control zone, each ship covering the tail of the one ahead.
+* **Feigned retreat**: a line that turns and runs when the enemy comes close, then turns on them inside 55% of gun range. The bots have no memory, so the feint runs on a clock (at most 3 s in every 10).
 
-| Formation | vs default bots | vs rusher | vs sniper | vs zone |
-|---|---|---|---|---|
-| Wedge | 98% | 92% | 100% | 90% |
-| Line | 98% | 92% | 100% | 90% |
-| False gap | 80% | 90% | 100% | 65% |
+**Fighting pairs** (`PAIRS`, `pair_action`). The team splits into leader-wingman pairs, and the leader fights like the default bot.
 
-The false gap wins less often because its centre gives up the control zone while it falls back. The three styles are on the gauntlet (after the hall of fame, so the other opponents keep their battle seeds) and in `train_population.py`'s opponent pool. Videos: [wedge vs bots](results/formation_wedge_vs_bots.mp4) · [line vs bots](results/formation_line_vs_bots.mp4) · [false gap vs bots](results/formation_falsegap_vs_bots.mp4).
+* **Fighting pair**: the wingman holds 70 px behind and to one side of its leader and shoots what the pair meets.
+* **Thach weave**: the pair flies line abreast, 160 px apart. When an enemy sits on one ship's tail, that ship turns hard toward its partner, dragging the attacker across the partner's guns, while the partner turns into the attacker and fires.
+
+**Dogfight manoeuvres** (`MANEUVERS`, `maneuver_action`). These are the default bot plus a defensive move whenever an enemy is on its tail (behind it, within 80% of gun range and pointing at it).
+
+* **Break turn**: a hard turn across the attacker's line of fire at full thrust.
+* **Flat scissors**: throttle back and reverse the turn every 0.7 s, so a faster attacker overshoots.
+* **Skid** (flat-scissors drift): cut the engine and spin round to face the attacker, sliding on momentum while firing back.
+
+Win rates against the other bots (40 battles each, from both sides, competitive rules):
+
+| Style | | vs default bots | vs rusher | vs sniper | vs zone |
+|---|---|---|---|---|---|
+| `bots:wedge` | Wedge | 98% | 92% | 100% | 90% |
+| `bots:line` | Line | 98% | 92% | 100% | 90% |
+| `bots:echelon` | Echelon | 95% | 92% | 98% | 92% |
+| `bots:fingerfour` | Finger four | 98% | 95% | 100% | 88% |
+| `bots:falsegap` | False gap | 80% | 90% | 100% | 65% |
+| `bots:pincer` | Pincer | 98% | 95% | 100% | 92% |
+| `bots:hammer` | Hammer and anvil | 88% | 92% | 100% | 82% |
+| `bots:circle` | Cantabrian circle | 95% | 95% | 95% | 92% |
+| `bots:lufbery` | Lufbery circle | 95% | 95% | 100% | 92% |
+| `bots:retreat` | Feigned retreat | 72% | 75% | 78% | 57% |
+| `bots:pair` | Fighting pair | 60% | 65% | 98% | 60% |
+| `bots:thach` | Thach weave | 55% | 42% | 98% | 55% |
+| `bots:break` | Break turn | 40% | 30% | 92% | 48% |
+| `bots:scissors` | Flat scissors | 32% | 32% | 95% | 42% |
+| `bots:skid` | Skid (flat-scissors drift) | 48% | 38% | 98% | 46% |
+
+Flying together pays off. Every formation and team tactic beats the default bots (72 to 98%). The false gap and the feigned retreat win less often because they give up the control zone while they fall back. The pairs only break even, because their leaders fly like the default bot.
+
+The dogfight manoeuvres don't help at all (32 to 48% against the default bots). In this game a ship turns at 4.2 rad/s (a full circle in 1.5 s), and its nose isn't tied to its direction of travel, so it can spin round and shoot backwards while sliding. An attacker never stays on anyone's tail long enough for a break or a scissors to matter. For those manoeuvres to mean something, the game would need flight-like rules: turn rate depending on speed, and turning that bleeds energy.
+
+The arena is small, so the shapes mostly show on the approach and when a team regroups. Contact comes about 2 to 3 seconds after the start, and then it becomes a close fight. Twelve of the styles (every formation and tactic, plus the Thach weave and the skid) are gauntlet opponents, placed after the hall of fame so the other opponents keep their battle seeds. All fifteen are in `train_population.py`'s opponent pool. Videos of each against the default bots are on the [videos page](videos.html).
 
 ### Where the training time goes
 

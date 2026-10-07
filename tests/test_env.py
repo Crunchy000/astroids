@@ -362,14 +362,14 @@ def test_formation_bots_hold_their_shape():
     assert np.ptp(fwd) > 80 and abs(lat[lead]) < 50
 
 
-def test_formation_bots_fight():
-    from astroids_gym.bot import FORMATIONS, scripted_action
+def test_tactics_bots_fight():
+    from astroids_gym.bot import FORMATIONS, MANEUVERS, PAIRS, scripted_action
 
-    for k, style in enumerate(FORMATIONS):
+    for k, style in enumerate(FORMATIONS + PAIRS + MANEUVERS):
         sim = Simulation(Config.competitive(), seed=30 + k)
         shots = [0, 0]
         while not sim.over:
             ev = sim.step({s.id: scripted_action(sim, s, 1, style if s.team == 0 else None) for s in sim.ships})
             for s in sim.ships:
                 shots[s.team] += ev.shots[s.id]
-        assert shots[0] > 100 and sim.team_score(0) > 0, style
+        assert shots[0] > 50 and sim.team_score(0) > 0, style

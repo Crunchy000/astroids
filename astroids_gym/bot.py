@@ -82,6 +82,10 @@ def scripted_action(sim: Simulation, s: Ship, horizon: int = 1, style: str | Non
     """
     if style in FORMATIONS:
         return formation_action(sim, s, horizon, style)
+    if style in PAIRS:
+        return pair_action(sim, s, horizon, style)
+    if style in MANEUVERS:
+        return maneuver_action(sim, s, horizon, style)
     cfg = sim.cfg
     if not s.alive:
         return (0.0, False, False)
@@ -161,7 +165,9 @@ def scripted_action(sim: Simulation, s: Ship, horizon: int = 1, style: str | Non
 
 # Team formations: each ship flies to a slot in a shape centred on its team and
 # facing the objective (the enemy, or the control zone while the enemy is far).
-FORMATIONS = ("wedge", "line", "falsegap", "echelon", "pincer", "hammer", "circle", "retreat")
+FORMATIONS = ("wedge", "line", "falsegap", "echelon", "pincer", "hammer", "circle", "retreat", "fingerfour",
+              "lufbery")
+RINGS = {"circle": (120.0, 0.9), "lufbery": (140.0, 1.0)}  # radius (px), rotation (rad/s)
 SPACING = 70.0  # px between neighbouring slots
 
 
@@ -202,11 +208,21 @@ def _slot(style: str, k: int, n: int, r: float, t: float) -> tuple[float, float]
             return 0.0, (k - (min(n, n - 2) - 1) / 2) * SPACING + SPACING * 0.5
         side = (2.6 + (k - (n - 2)) * 0.7) * SPACING
         return (min(r, 1.5) * SPACING * 2.4 if r < 1.6 else -SPACING), -side
-    if style == "circle":
-        # Cantabrian circle: the team rides a rotating ring, so every ship keeps
-        # moving and passes the front in turn, firing as it goes.
-        a = 2 * math.pi * k / n + 0.9 * t
-        return 120.0 * math.cos(a), 120.0 * math.sin(a)
+    if style in RINGS:
+        # Cantabrian circle: the team rides a rotating ring toward the enemy, so every
+        # ship keeps moving and passes the front in turn, firing as it goes.
+        # Lufbery circle: a defensive ring held over the control zone, each ship
+        # covering the tail of the one ahead of it.
+        radius, spin = RINGS[style]
+        a = 2 * math.pi * k / n + spin * t
+        return radius * math.cos(a), radius * math.sin(a)
+    if style == "fingerfour":
+        # Finger four: the fingertips of a hand seen from above. The leader (middle
+        # finger) in front, its wingman back on one side, the second element back on
+        # the other, and a fifth ship trailing the short side.
+        tips = [(-1.0, -2.0), (-0.5, -1.0), (0.0, 0.0), (-0.5, 1.0), (-1.5, 2.0)]
+        f, side = tips[min(k, 4)] if n == 5 else (-abs(c) * 0.5, c)
+        return f * SPACING, side * SPACING
     raise ValueError(f"unknown formation {style!r}")
 
 
@@ -231,6 +247,10 @@ def formation_action(sim: Simulation, s: Ship, horizon: int = 1, style: str = "l
     else:
         ox, oy = math.cos(s.a), math.sin(s.a)
     heading = math.atan2(oy, ox)
+    if style == "lufbery":  # the ring sits on the zone (or where the team is) and stays put
+        if cfg.zone:
+            cx, cy = cfg.width / 2, cfg.height / 2
+        heading = 0.0
     fx, fy = math.cos(heading), math.sin(heading)
     r = near / gun_range
     lure = style == "falsegap" and r < 1.1
@@ -241,12 +261,15 @@ def formation_action(sim: Simulation, s: Ship, horizon: int = 1, style: str = "l
     fleeing = style == "retreat" and 0.55 < r < 1.1 and sim.time % 10.0 < 3.0
     if fleeing:
         cruise = -110.0
+    if style == "lufbery":
+        cruise = 0.0
 
     # Slots go left to right in the order the ships already stand, so nobody crosses over.
-    if style == "circle":  # ring slots go round in the order the ships stand on the ring
+    if style in RINGS:  # ring slots go round in the order the ships stand on the ring
+        spin = RINGS[style][1]
         order = sorted(mates, key=lambda o: (math.atan2(sim.wdx(cx, o.x) * -fy + sim.wdy(cy, o.y) * fx,
                                                         sim.wdx(cx, o.x) * fx + sim.wdy(cy, o.y) * fy)
-                                             - 0.9 * sim.time) % (2 * math.pi))
+                                             - spin * sim.time) % (2 * math.pi))
     else:
         order = sorted(mates, key=lambda o: (-sim.wdx(cx, o.x) * fy + sim.wdy(cy, o.y) * fx, o.id))
     slots = [_slot(style, k, len(mates), r, sim.time) for k in range(len(mates))]
@@ -255,15 +278,31 @@ def formation_action(sim: Simulation, s: Ship, horizon: int = 1, style: str = "l
     fwd -= mf
     tx = cx + fx * fwd - fy * left
     ty = cy + fy * fwd + fx * left
+    # A false-gap centre ship falls back while the enemy closes in; once they are
+    # inside 60% of gun range the trap is sprung and everyone fights.
+    def feint(sd: float) -> bool:
+        return (lure and near > 0.6 * gun_range and fwd < -SPACING and sd > 60) or fleeing
+
+    return _fly_slot(sim, s, horizon, tx, ty, fx * cruise, fy * cruise, enemies, heading, feint)
+
+
+def _fly_slot(sim: Simulation, s: Ship, horizon: int, tx: float, ty: float, bvx: float, bvy: float,
+              enemies: list[Ship], heading: float, feint=lambda sd: False) -> Action:
+    """Hold station at (tx, ty) while moving at (bvx, bvy); shoot what is in range; dodge.
+
+    ``feint(slot distance)`` says when to keep flying to the slot instead of fighting.
+    """
+    cfg = sim.cfg
+    gun_range = cfg.bullet_speed * cfg.bullet_life
     sx, sy = sim.wdx(s.x, tx), sim.wdy(s.y, ty)
     sd = math.hypot(sx, sy)
-    # Station keeping: aim for the formation's cruise velocity plus a pull toward
-    # the slot, and thrust along the velocity error (turning round to brake).
+    # Station keeping: aim for the formation's velocity plus a pull toward the
+    # slot, and thrust along the velocity error (turning round to brake).
     px, py = 1.5 * sx, 1.5 * sy
     pn = math.hypot(px, py)
     if pn > 150.0:
         px, py = px * 150.0 / pn, py * 150.0 / pn
-    vx, vy = fx * cruise + px, fy * cruise + py
+    vx, vy = bvx + px, bvy + py
     ex, ey = vx - s.vx, vy - s.vy
     to_slot = math.atan2(ey, ex)
     need = math.hypot(ex, ey) > 25
@@ -274,10 +313,7 @@ def formation_action(sim: Simulation, s: Ship, horizon: int = 1, style: str = "l
         aim, t, dx, dy = lead(sim, s, best)
         dist = math.hypot(dx, dy)
         fire = abs(wrap_angle(aim - s.a)) < 0.12 and dist < gun_range * 0.9 and t < cfg.bullet_life
-    # A false-gap centre ship falls back while the enemy closes in; once they are
-    # inside 60% of gun range the trap is sprung and everyone fights.
-    feint = (lure and near > 0.6 * gun_range and fwd < -SPACING and sd > 60) or fleeing
-    if best is not None and dist < gun_range and not feint:
+    if best is not None and dist < gun_range and not feint(sd):
         # A target in range: turn and shoot, thrusting back toward the slot when facing it.
         desired = aim
         thrust = need and abs(wrap_angle(to_slot - s.a)) < 0.6
@@ -288,6 +324,12 @@ def formation_action(sim: Simulation, s: Ship, horizon: int = 1, style: str = "l
         desired = aim if best is not None and dist < gun_range * 1.2 else heading
         thrust = False
 
+    return _steer(sim, s, horizon, desired, thrust, fire)
+
+
+def _steer(sim: Simulation, s: Ship, horizon: int, desired: float, thrust: bool, fire: bool) -> Action:
+    """Dodge threats if they are close, then turn toward ``desired``."""
+    cfg = sim.cfg
     ax, ay, threat = _threats(sim, s)
     if threat > 0.35:
         desired = math.atan2(ay, ax)
@@ -297,3 +339,97 @@ def formation_action(sim: Simulation, s: Ship, horizon: int = 1, style: str = "l
     diff = wrap_angle(desired - s.a)
     turn = max(-1.0, min(1.0, diff / (cfg.turn_rate * cfg.dt * horizon)))
     return (turn, thrust, fire)
+
+
+# Fighting pairs: the team splits into leader-wingman pairs (by ship id; an odd
+# ship out flies alone). The leader fights like the default bot.
+PAIRS = ("pair", "thach")
+
+
+def _tail_threat(sim: Simulation, s: Ship, enemies: list[Ship]) -> Ship | None:
+    """The closest enemy sitting behind ``s`` within range and pointing at it, if any."""
+    gun_range = sim.cfg.bullet_speed * sim.cfg.bullet_life
+    worst, worst_d = None, 0.8 * gun_range
+    for e in enemies:
+        dx, dy = sim.wdx(s.x, e.x), sim.wdy(s.y, e.y)
+        d = math.hypot(dx, dy)
+        if d >= worst_d:
+            continue
+        behind = abs(wrap_angle(math.atan2(dy, dx) - s.a)) > 1.9
+        pointing = abs(wrap_angle(math.atan2(-dy, -dx) - e.a)) < 0.4
+        if behind and pointing:
+            worst, worst_d = e, d
+    return worst
+
+
+def pair_action(sim: Simulation, s: Ship, horizon: int = 1, style: str = "pair") -> Action:
+    """``"pair"``: the wingman holds 70 px behind and to one side of its leader and
+    shoots what the pair meets. ``"thach"`` (Thach weave): the pair flies line abreast
+    160 px apart, and when an enemy sits on one ship's tail, that ship turns hard
+    toward its partner, dragging the attacker across the partner's guns, while the
+    partner turns into the attacker and fires."""
+    cfg = sim.cfg
+    if not s.alive:
+        return (0.0, False, False)
+    mates = [o for o in sim.ships if o.alive and o.team == s.team]
+    enemies = [o for o in sim.ships if o.alive and o.team != s.team]
+    i = mates.index(s)
+    partner = mates[i ^ 1] if (i ^ 1) < len(mates) else None
+    if partner is None:
+        return scripted_action(sim, s, horizon)
+    leader = s if i % 2 == 0 else partner
+
+    if style == "thach":
+        for me, other in ((s, partner), (partner, s)):
+            attacker = _tail_threat(sim, me, enemies)
+            if attacker is None:
+                continue
+            if me is s:  # break toward the partner, pulling the attacker across its nose
+                desired = math.atan2(sim.wdy(s.y, partner.y), sim.wdx(s.x, partner.x))
+                return _steer(sim, s, horizon, desired, True, False)
+            aim = lead(sim, s, attacker)[0]  # the partner: turn into the attacker and shoot
+            fire = abs(wrap_angle(aim - s.a)) < 0.12
+            return _steer(sim, s, horizon, aim, abs(wrap_angle(aim - s.a)) < 0.5, fire)
+    if s is leader:
+        return scripted_action(sim, s, horizon)
+
+    # Wingman: station on the leader, in the leader's frame of motion.
+    sp = math.hypot(leader.vx, leader.vy)
+    hx, hy = (leader.vx / sp, leader.vy / sp) if sp > 20 else (math.cos(leader.a), math.sin(leader.a))
+    side = 1 if leader.id < s.id else -1
+    back, out = (0.0, 160.0) if style == "thach" else (70.0, 50.0)
+    tx = leader.x - hx * back - hy * out * side
+    ty = leader.y - hy * back + hx * out * side
+    return _fly_slot(sim, s, horizon, tx, ty, leader.vx, leader.vy, enemies, math.atan2(hy, hx))
+
+
+# Dogfight manoeuvres: the default bot, plus a defensive move whenever an enemy is
+# on its tail (behind, within 80% of gun range, pointing at it).
+MANEUVERS = ("break", "scissors", "skid")
+
+
+def maneuver_action(sim: Simulation, s: Ship, horizon: int = 1, style: str = "break") -> Action:
+    """``"break"``: a hard turn across the attacker's line of fire at full thrust.
+    ``"scissors"`` (flat scissors): throttle back and reverse the turn every 0.7 s,
+    so a faster attacker overshoots and ends up in front. ``"skid"`` (flat-scissors
+    drift): cut the engine and spin round to face the attacker, sliding on the
+    ship's momentum while firing back at it."""
+    if not s.alive:
+        return (0.0, False, False)
+    enemies = [o for o in sim.ships if o.alive and o.team != s.team]
+    attacker = _tail_threat(sim, s, enemies)
+    if attacker is None:
+        return scripted_action(sim, s, horizon)
+    bearing = math.atan2(sim.wdy(s.y, attacker.y), sim.wdx(s.x, attacker.x))
+    aim = lead(sim, s, attacker)[0]
+    if style == "break":  # perpendicular to the line of sight, on the side we already turn toward
+        side = 1 if wrap_angle(s.a - bearing) > 0 else -1
+        return _steer(sim, s, horizon, bearing + side * math.pi / 2, True, False)
+    speed = math.hypot(s.vx, s.vy)
+    if style == "scissors":
+        weave = 0.9 if (sim.time // 0.7) % 2 == 0 else -0.9
+        desired = aim if abs(wrap_angle(aim - s.a)) < 0.3 else bearing + weave
+        fire = abs(wrap_angle(aim - s.a)) < 0.12
+        return _steer(sim, s, horizon, desired, speed < 60, fire)
+    fire = abs(wrap_angle(aim - s.a)) < 0.12  # skid: engine off, nose on the attacker
+    return _steer(sim, s, horizon, aim, False, fire)

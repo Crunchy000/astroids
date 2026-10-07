@@ -2,39 +2,121 @@
   "sections": [
     {
       "id": "formations",
-      "title": "Formation bots: wedge, line and false gap",
-      "summary": "Three new scripted bot teams fly in formation. Each ship takes a slot in a shape centred on its team and facing the objective (the control zone, then the enemy), and holds it by matching the formation's velocity. The wedge puts a leader in front with the others swept back; the line flies shoulder to shoulder; the false gap leaves a hole in the middle, and when the enemy comes within range its centre falls back to draw them in while the flanks push forward and close. The arena is small, so the shapes show mostly on the approach and when a team regroups, but flying together pays off: the wedge and the line beat the default bots 98% of the time, and the false gap 80% (its centre gives up the control zone while it falls back). They are now gauntlet opponents and in the training opponent pool.",
+      "title": "Formations and tactics for the bots",
+      "summary": "Fifteen new scripted bot styles. Formations (wedge, line, echelon, finger four) and team tactics (false gap, pincer, hammer and anvil, Cantabrian circle, Lufbery circle, feigned retreat) give each ship a slot in a shape centred on its team, facing the control zone and then the enemy. Fighting pairs (a plain wingman pair and the Thach weave) split the team into leader-wingman pairs. Dogfight manoeuvres (break turn, flat scissors, skid) add a defensive move to the default bot whenever an enemy is on its tail. Every formation and team tactic beats the default bots (72 to 98%), and the pairs break even. The dogfight manoeuvres don't help (32 to 48%): ships turn a full circle in 1.5 s and can spin round to shoot while sliding, so nobody stays on a tail long enough for them to matter. The arena is small, so the shapes show mostly on the approach and when a team regroups.",
       "table": {
         "columns": [
-          "Opponent (40 battles each)",
-          "Wedge",
-          "Line",
-          "False gap"
+          "Style (40 battles each)",
+          "vs default bots",
+          "vs rusher",
+          "vs sniper",
+          "vs zone"
         ],
         "rows": [
           [
-            "vs default bots",
+            "Wedge",
             "98%",
-            "98%",
-            "80%"
-          ],
-          [
-            "vs rusher bots",
             "92%",
-            "92%",
+            "100%",
             "90%"
           ],
           [
-            "vs sniper bots",
+            "Line",
+            "98%",
+            "92%",
             "100%",
-            "100%",
-            "100%"
+            "90%"
           ],
           [
-            "vs zone bots",
+            "Echelon",
+            "95%",
+            "92%",
+            "98%",
+            "92%"
+          ],
+          [
+            "Finger four",
+            "98%",
+            "95%",
+            "100%",
+            "88%"
+          ],
+          [
+            "False gap",
+            "80%",
             "90%",
-            "90%",
+            "100%",
             "65%"
+          ],
+          [
+            "Pincer",
+            "98%",
+            "95%",
+            "100%",
+            "92%"
+          ],
+          [
+            "Hammer and anvil",
+            "88%",
+            "92%",
+            "100%",
+            "82%"
+          ],
+          [
+            "Cantabrian circle",
+            "95%",
+            "95%",
+            "95%",
+            "92%"
+          ],
+          [
+            "Lufbery circle",
+            "95%",
+            "95%",
+            "100%",
+            "92%"
+          ],
+          [
+            "Feigned retreat",
+            "72%",
+            "75%",
+            "78%",
+            "57%"
+          ],
+          [
+            "Fighting pair",
+            "60%",
+            "65%",
+            "98%",
+            "60%"
+          ],
+          [
+            "Thach weave",
+            "55%",
+            "42%",
+            "98%",
+            "55%"
+          ],
+          [
+            "Break turn",
+            "40%",
+            "30%",
+            "92%",
+            "48%"
+          ],
+          [
+            "Flat scissors",
+            "32%",
+            "32%",
+            "95%",
+            "42%"
+          ],
+          [
+            "Skid (flat-scissors drift)",
+            "48%",
+            "38%",
+            "98%",
+            "46%"
           ]
         ],
         "highlight": 0
@@ -53,10 +135,82 @@
           "poster": "results/formation_line_vs_bots.jpg"
         },
         {
+          "src": "results/formation_echelon_vs_bots.mp4",
+          "title": "Echelon vs the default bots",
+          "note": "Same seed. Blue (echelon) wins by wipe-out at 44 s, 31.5 to 28.6.",
+          "poster": "results/formation_echelon_vs_bots.jpg"
+        },
+        {
+          "src": "results/formation_fingerfour_vs_bots.mp4",
+          "title": "Finger four vs the default bots",
+          "note": "Same seed. Blue (finger four) wins by wipe-out at 53 s, 39.6 to 32.1.",
+          "poster": "results/formation_fingerfour_vs_bots.jpg"
+        },
+        {
           "src": "results/formation_falsegap_vs_bots.mp4",
           "title": "False gap vs the default bots",
           "note": "Same seed. Blue (false gap) wins by wipe-out at 44 s, 34.4 to 29.3.",
           "poster": "results/formation_falsegap_vs_bots.jpg"
+        },
+        {
+          "src": "results/formation_pincer_vs_bots.mp4",
+          "title": "Pincer vs the default bots",
+          "note": "Same seed. Blue (pincer) wins by wipe-out at 55 s despite trailing 38.6 to 41.8 on points.",
+          "poster": "results/formation_pincer_vs_bots.jpg"
+        },
+        {
+          "src": "results/formation_hammer_vs_bots.mp4",
+          "title": "Hammer and anvil vs the default bots",
+          "note": "Same seed. Blue (hammer and anvil) wins by wipe-out at 42 s, 31.2 to 26.9.",
+          "poster": "results/formation_hammer_vs_bots.jpg"
+        },
+        {
+          "src": "results/formation_circle_vs_bots.mp4",
+          "title": "Cantabrian circle vs the default bots",
+          "note": "Same seed. Blue (Cantabrian circle) wins by wipe-out at 48 s, 40.2 to 36.4.",
+          "poster": "results/formation_circle_vs_bots.jpg"
+        },
+        {
+          "src": "results/formation_lufbery_vs_bots.mp4",
+          "title": "Lufbery circle vs the default bots",
+          "note": "Same seed. Blue (Lufbery circle) wins by wipe-out at 45 s, 41.0 to 28.9.",
+          "poster": "results/formation_lufbery_vs_bots.jpg"
+        },
+        {
+          "src": "results/formation_retreat_vs_bots.mp4",
+          "title": "Feigned retreat vs the default bots",
+          "note": "Same seed. Blue (feigned retreat) wins by wipe-out at 55 s despite trailing 31.4 to 43.1 on points.",
+          "poster": "results/formation_retreat_vs_bots.jpg"
+        },
+        {
+          "src": "results/formation_pair_vs_bots.mp4",
+          "title": "Fighting pair vs the default bots",
+          "note": "Same seed. Red wins by wipe-out at 53 s, 38.8 to 36.7.",
+          "poster": "results/formation_pair_vs_bots.jpg"
+        },
+        {
+          "src": "results/formation_thach_vs_bots.mp4",
+          "title": "Thach weave vs the default bots",
+          "note": "Same seed. Red wins by wipe-out at 52 s, 36.5 to 30.4.",
+          "poster": "results/formation_thach_vs_bots.jpg"
+        },
+        {
+          "src": "results/formation_break_vs_bots.mp4",
+          "title": "Break turn vs the default bots",
+          "note": "Same seed. Blue (break turn) wins by wipe-out at 53 s, 46.3 to 45.9.",
+          "poster": "results/formation_break_vs_bots.jpg"
+        },
+        {
+          "src": "results/formation_scissors_vs_bots.mp4",
+          "title": "Flat scissors vs the default bots",
+          "note": "Same seed. Blue (flat scissors) wins by wipe-out at 59 s despite trailing 34.8 to 37.3 on points.",
+          "poster": "results/formation_scissors_vs_bots.jpg"
+        },
+        {
+          "src": "results/formation_skid_vs_bots.mp4",
+          "title": "Skid (flat-scissors drift) vs the default bots",
+          "note": "Same seed. Blue (skid) wins by wipe-out at 49 s, 35.9 to 34.1.",
+          "poster": "results/formation_skid_vs_bots.jpg"
         }
       ]
     },
