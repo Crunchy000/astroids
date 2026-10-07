@@ -186,14 +186,15 @@ def warm_start(init_path: str, venv, hyper: dict, seed: int) -> PPO:
     return model
 
 
-def opponent_mix(name, latest, snapshots, rng, max_snapshots=6):
-    """50% other members' latest, 30% past snapshots, 20% bots (renormalised if a group is empty)."""
+def opponent_mix(name, latest, snapshots, rng, bots_share=0.2, max_snapshots=6):
+    """Other members' latest, past snapshots (5:3) and bots (``bots_share``); renormalised if a group is empty."""
     others = [latest[o] for o in latest if o != name]
     current = set(latest.values())
     past = [s for s in snapshots if s not in current]
     if len(past) > max_snapshots:
         past = list(rng.choice(past, max_snapshots, replace=False))
-    groups = [(others, 0.5), (past, 0.3), (["bots"], 0.2)]
+    rest = 1.0 - bots_share
+    groups = [(others, rest * 0.625), (past, rest * 0.375), (["bots"], bots_share)]
     total = sum(w for g, w in groups if g)
     return [(spec, w / total / len(g)) for g, w in groups if g for spec in g]
 
@@ -210,7 +211,9 @@ def main():
     p.add_argument("--n-steps", type=int, default=128, help="PPO rollout length per env slot")
     p.add_argument("--lr", type=float, default=1e-4)
     p.add_argument("--tournament-battles", type=int, default=10, help="battles per pair per round")
+    p.add_argument("--bots-share", type=float, default=0.2, help="fraction of training battles against bots")
     p.add_argument("--out", default="league")
+    p.add_argument("--resume", action="store_true", help="continue the run in --out from its last round")
     p.add_argument("--seed", type=int, default=0)
     args = p.parse_args()
 
@@ -224,21 +227,32 @@ def main():
     print(f"{venv.num_envs} env slots ({args.n_workers} workers x {args.battles_per_worker} battles x 5 ships), "
           f"{hyper['n_steps'] * venv.num_envs:,} samples per PPO update", flush=True)
 
-    # The starting champion, widened to this ruleset's observations (same behaviour).
-    champion = export_policy(warm_start(args.init, venv, hyper, args.seed), f"{args.out}/models/champion.npz")
+    champion = f"{args.out}/models/champion.npz"
     models, latest = {}, {}
-    for i, n in enumerate(names):
-        models[n] = warm_start(args.init, venv, hyper, args.seed + i)
-        latest[n] = champion
-    snapshots = [champion]
-    state = {"rules": args.rules, "members": names,
-             "personalities": {n: PERSONALITIES[n] for n in names}, "rounds": []}
+    if args.resume:  # pick up each member's snapshot from the last finished round
+        with open(f"{args.out}/league.json") as f:
+            state = json.load(f)
+        done = len(state["rounds"])
+        snapshots = [champion] + [f"{args.out}/models/{n}_r{r}.npz" for r in range(1, done + 1) for n in names]
+        for n in names:
+            models[n] = PPO.load(f"{args.out}/models/{n}_r{done}.zip", env=venv, custom_objects=hyper, device="cpu")
+            latest[n] = f"{args.out}/models/{n}_r{done}.npz"
+        print(f"resuming after round {done}", flush=True)
+    else:
+        # The starting champion, widened to this ruleset's observations (same behaviour).
+        export_policy(warm_start(args.init, venv, hyper, args.seed), champion)
+        for i, n in enumerate(names):
+            models[n] = warm_start(args.init, venv, hyper, args.seed + i)
+            latest[n] = champion
+        snapshots = [champion]
+        state = {"rules": args.rules, "members": names,
+                 "personalities": {n: PERSONALITIES[n] for n in names}, "rounds": []}
     switch = ThreadSwitch(os.cpu_count())
 
-    for rnd in range(1, args.rounds + 1):
-        round_log = {"round": rnd, "training": {}}
+    for rnd in range(len(state["rounds"]) + 1, args.rounds + 1):
+        round_log = {"round": rnd, "training": {}, "bots_share": args.bots_share}
         for n in names:
-            opponents = opponent_mix(n, latest, snapshots, rng)
+            opponents = opponent_mix(n, latest, snapshots, rng, args.bots_share)
             venv.configure(reward=PERSONALITIES[n], opponents=opponents)
             venv.results.clear()
             model = models[n]
