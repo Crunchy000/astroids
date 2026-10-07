@@ -56,12 +56,12 @@ import numpy as np  # noqa: E402
 import torch  # noqa: E402
 from stable_baselines3 import PPO  # noqa: E402
 
-from astroids_gym.bot import STYLES  # noqa: E402
+from astroids_gym.bot import FORMATIONS, STYLES  # noqa: E402
 from league import FRAME_SKIP, MAX_STEPS, export_policy, fit_elo, make_rules, tournament, win_matrix  # noqa: E402
 from train_league import (PERSONALITIES, LeagueVecEnv, ThreadSwitch, grow_model,  # noqa: E402
                           net_widths, opponent_mix)
 
-BOT_SPECS = ["bots"] + [f"bots:{s}" for s in STYLES]
+BOT_SPECS = ["bots"] + [f"bots:{s}" for s in STYLES + FORMATIONS]
 # Exploiters only care about beating their target.
 EXPLOITER_REWARD = {**PERSONALITIES["evolved"], "win": 6.0}
 

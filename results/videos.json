@@ -1,6 +1,66 @@
 {
   "sections": [
     {
+      "id": "formations",
+      "title": "Formation bots: wedge, line and false gap",
+      "summary": "Three new scripted bot teams fly in formation. Each ship takes a slot in a shape centred on its team and facing the objective (the control zone, then the enemy), and holds it by matching the formation's velocity. The wedge puts a leader in front with the others swept back; the line flies shoulder to shoulder; the false gap leaves a hole in the middle, and when the enemy comes within range its centre falls back to draw them in while the flanks push forward and close. The arena is small, so the shapes show mostly on the approach and when a team regroups, but flying together pays off: the wedge and the line beat the default bots 98% of the time, and the false gap 80% (its centre gives up the control zone while it falls back). They are now gauntlet opponents and in the training opponent pool.",
+      "table": {
+        "columns": [
+          "Opponent (40 battles each)",
+          "Wedge",
+          "Line",
+          "False gap"
+        ],
+        "rows": [
+          [
+            "vs default bots",
+            "98%",
+            "98%",
+            "80%"
+          ],
+          [
+            "vs rusher bots",
+            "92%",
+            "92%",
+            "90%"
+          ],
+          [
+            "vs sniper bots",
+            "100%",
+            "100%",
+            "100%"
+          ],
+          [
+            "vs zone bots",
+            "90%",
+            "90%",
+            "65%"
+          ]
+        ],
+        "highlight": 0
+      },
+      "videos": [
+        {
+          "src": "results/formation_wedge_vs_bots.mp4",
+          "title": "Wedge vs the default bots",
+          "note": "Seed 7. Blue (wedge) wins by wipe-out at 45 s, 42.5 to 18.2.",
+          "poster": "results/formation_wedge_vs_bots.jpg"
+        },
+        {
+          "src": "results/formation_line_vs_bots.mp4",
+          "title": "Line vs the default bots",
+          "note": "Same seed. Blue (line) wins by wipe-out at 45 s, 30.3 to 22.0.",
+          "poster": "results/formation_line_vs_bots.jpg"
+        },
+        {
+          "src": "results/formation_falsegap_vs_bots.mp4",
+          "title": "False gap vs the default bots",
+          "note": "Same seed. Blue (false gap) wins by wipe-out at 44 s, 34.4 to 29.3.",
+          "poster": "results/formation_falsegap_vs_bots.jpg"
+        }
+      ]
+    },
+    {
       "id": "colab",
       "title": "First GPU run: an attention population on Colab",
       "summary": "Six attention-model teams, all copies of the attention model with three reward personalities, plus one exploiter, trained for 12 rounds on a Colab L4 GPU (about 70 minutes, 400k samples per member per round). The 'evolved' line took over, and its best member, m08, whose network grew to 384 units, led the last three rounds. On the gauntlet it scored 95%, against 91% for the attention model it started from, with the biggest gains against m16 (85% vs 70%) and the league striker (98% vs 90%). Head to head over 100 fresh battles it beat the attention model 66% of the time, though by a small average margin (+1.7 points per battle).",

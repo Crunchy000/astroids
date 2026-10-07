@@ -30,6 +30,41 @@ def lead(sim: Simulation, s: Ship, target: Ship) -> tuple[float, float, float, f
     return math.atan2(dy + rvy * t, dx + rvx * t), t, dx, dy
 
 
+def _threats(sim: Simulation, s: Ship) -> tuple[float, float, float]:
+    """Dodge direction (ax, ay) away from enemy bullets heading at ``s`` and nearby asteroids, and its urgency."""
+    cfg = sim.cfg
+    ww, wh = cfg.width, cfg.height
+    hw, hh = ww / 2, wh / 2
+    ax = ay = threat = 0.0
+    for bl in sim.bullets:
+        if bl.team == s.team:
+            continue
+        dx = (s.x - bl.x + hw) % ww - hw  # inlined sim.wdx / sim.wdy (hot loop)
+        dy = (s.y - bl.y + hh) % wh - hh
+        d2 = dx * dx + dy * dy
+        if d2 > 140 * 140 or dx * bl.vx + dy * bl.vy <= 0:
+            continue
+        sgn = 1 if dx * bl.vy - dy * bl.vx > 0 else -1
+        w = 1 - math.sqrt(d2) / 140
+        ax += -bl.vy * sgn * w
+        ay += bl.vx * sgn * w
+        threat += w
+    for ast in sim.asteroids:
+        dx, dy = (s.x - ast.x + hw) % ww - hw, (s.y - ast.y + hh) % wh - hh
+        reach = 90 + ast.r + cfg.ship_r
+        if dx * dx + dy * dy > reach * reach * 1.002:  # clearly out of range; hypot decides close calls
+            continue
+        d = math.hypot(dx, dy) - ast.r - cfg.ship_r
+        if d > 90:
+            continue
+        w = 1 - max(d, 0) / 90
+        denom = max(d + ast.r, 1e-6)
+        ax += dx / denom * 400 * w
+        ay += dy / denom * 400 * w
+        threat += w * 1.5
+    return ax, ay, threat
+
+
 STYLES = ("rusher", "sniper", "zone")
 
 
@@ -43,7 +78,10 @@ def scripted_action(sim: Simulation, s: Ship, horizon: int = 1, style: str | Non
     gauntlets): ``"rusher"`` closes to point-blank range and never breaks off,
     ``"sniper"`` holds at 60-90% of gun range and backs away from anything
     closer, ``"zone"`` sits in the control zone and only fights what comes near.
+    The ``FORMATIONS`` styles fly as a team: see ``formation_action``.
     """
+    if style in FORMATIONS:
+        return formation_action(sim, s, horizon, style)
     cfg = sim.cfg
     if not s.alive:
         return (0.0, False, False)
@@ -110,33 +148,107 @@ def scripted_action(sim: Simulation, s: Ship, horizon: int = 1, style: str | Non
         fire = fire and best is not None
 
     # Dodge enemy bullets heading our way and nearby asteroids.
-    ax = ay = threat = 0.0
-    for bl in sim.bullets:
-        if bl.team == s.team:
-            continue
-        dx = (s.x - bl.x + hw) % ww - hw  # inlined sim.wdx / sim.wdy (hot loop)
-        dy = (s.y - bl.y + hh) % wh - hh
-        d2 = dx * dx + dy * dy
-        if d2 > 140 * 140 or dx * bl.vx + dy * bl.vy <= 0:
-            continue
-        sgn = 1 if dx * bl.vy - dy * bl.vx > 0 else -1
-        w = 1 - math.sqrt(d2) / 140
-        ax += -bl.vy * sgn * w
-        ay += bl.vx * sgn * w
-        threat += w
-    for ast in sim.asteroids:
-        dx, dy = (s.x - ast.x + hw) % ww - hw, (s.y - ast.y + hh) % wh - hh
-        reach = 90 + ast.r + cfg.ship_r
-        if dx * dx + dy * dy > reach * reach * 1.002:  # clearly out of range; hypot decides close calls
-            continue
-        d = math.hypot(dx, dy) - ast.r - cfg.ship_r
-        if d > 90:
-            continue
-        w = 1 - max(d, 0) / 90
-        denom = max(d + ast.r, 1e-6)
-        ax += dx / denom * 400 * w
-        ay += dy / denom * 400 * w
-        threat += w * 1.5
+    ax, ay, threat = _threats(sim, s)
+    if threat > 0.35:
+        desired = math.atan2(ay, ax)
+        thrust = abs(wrap_angle(desired - s.a)) < 1.0
+        fire = fire and threat < 1
+
+    diff = wrap_angle(desired - s.a)
+    turn = max(-1.0, min(1.0, diff / (cfg.turn_rate * cfg.dt * horizon)))
+    return (turn, thrust, fire)
+
+
+# Team formations: each ship flies to a slot in a shape centred on its team and
+# facing the objective (the enemy, or the control zone while the enemy is far).
+FORMATIONS = ("wedge", "line", "falsegap")
+SPACING = 70.0  # px between neighbouring slots
+
+
+def _slot(style: str, k: int, n: int, lure: bool) -> tuple[float, float]:
+    """(forward, left) offset of slot ``k`` of ``n`` from the formation anchor."""
+    c = k - (n - 1) / 2  # lateral index: -2..2 for five ships
+    if style == "wedge":  # leader in front, the rest swept back on both sides
+        return -abs(c) * SPACING * 0.9, c * SPACING * 0.8
+    if style == "line":  # shoulder to shoulder
+        return 0.0, c * SPACING
+    # False gap: a line with a hole in the middle. When the enemy comes within
+    # range the centre falls back to draw them into the hole, and the flanks push
+    # forward and close in, catching them in a crossfire.
+    if abs(c) < 1.5:
+        side = 0.0 if c == 0 else math.copysign(abs(c) + 0.5, c)
+        return (-1.8 * SPACING if lure else -0.6 * SPACING), side * SPACING
+    side = math.copysign(abs(c) + 0.5, c)
+    return (1.3 * SPACING, side * SPACING * 0.7) if lure else (0.0, side * SPACING)
+
+
+def formation_action(sim: Simulation, s: Ship, horizon: int = 1, style: str = "line") -> Action:
+    """Hold a slot in the team's ``style`` formation, fire at whatever is in range, dodge threats."""
+    cfg = sim.cfg
+    if not s.alive:
+        return (0.0, False, False)
+    mates = [o for o in sim.ships if o.alive and o.team == s.team]
+    enemies = [o for o in sim.ships if o.alive and o.team != s.team]
+    ref = mates[0]  # every ship measures from the same teammate, so all agree on the shape
+    cx = sum(sim.wdx(ref.x, o.x) for o in mates) / len(mates) + ref.x
+    cy = sum(sim.wdy(ref.y, o.y) for o in mates) / len(mates) + ref.y
+    gun_range = cfg.bullet_speed * cfg.bullet_life
+
+    near = min((math.hypot(sim.wdx(cx, o.x), sim.wdy(cy, o.y)) for o in enemies), default=math.inf)
+    if enemies and (not cfg.zone or near < 1.5 * gun_range):
+        ox = sum(sim.wdx(cx, o.x) for o in enemies) / len(enemies)
+        oy = sum(sim.wdy(cy, o.y) for o in enemies) / len(enemies)
+    elif cfg.zone:
+        ox, oy = sim.wdx(cx, cfg.width / 2), sim.wdy(cy, cfg.height / 2)
+    else:
+        ox, oy = math.cos(s.a), math.sin(s.a)
+    heading = math.atan2(oy, ox)
+    fx, fy = math.cos(heading), math.sin(heading)
+    lure = style == "falsegap" and near < 1.1 * gun_range
+    cruise = min(math.hypot(ox, oy), 90.0)  # the formation's own speed toward the objective
+
+    # Slots go left to right in the order the ships already stand, so nobody crosses over.
+    order = sorted(mates, key=lambda o: (-sim.wdx(cx, o.x) * fy + sim.wdy(cy, o.y) * fx, o.id))
+    slots = [_slot(style, k, len(mates), lure) for k in range(len(mates))]
+    mf = sum(f for f, _ in slots) / len(slots)  # centre the shape on the centre of mass
+    fwd, left = slots[order.index(s)]
+    fwd -= mf
+    tx = cx + fx * fwd - fy * left
+    ty = cy + fy * fwd + fx * left
+    sx, sy = sim.wdx(s.x, tx), sim.wdy(s.y, ty)
+    sd = math.hypot(sx, sy)
+    # Station keeping: aim for the formation's cruise velocity plus a pull toward
+    # the slot, and thrust along the velocity error (turning round to brake).
+    px, py = 1.5 * sx, 1.5 * sy
+    pn = math.hypot(px, py)
+    if pn > 150.0:
+        px, py = px * 150.0 / pn, py * 150.0 / pn
+    vx, vy = fx * cruise + px, fy * cruise + py
+    ex, ey = vx - s.vx, vy - s.vy
+    to_slot = math.atan2(ey, ex)
+    need = math.hypot(ex, ey) > 25
+
+    best = min(enemies, key=lambda o: math.hypot(sim.wdx(s.x, o.x), sim.wdy(s.y, o.y)), default=None)
+    fire = False
+    if best is not None:
+        aim, t, dx, dy = lead(sim, s, best)
+        dist = math.hypot(dx, dy)
+        fire = abs(wrap_angle(aim - s.a)) < 0.12 and dist < gun_range * 0.9 and t < cfg.bullet_life
+    # A false-gap centre ship falls back while the enemy closes in; once they are
+    # inside 60% of gun range the trap is sprung and everyone fights.
+    feint = lure and near > 0.6 * gun_range and fwd < -SPACING and sd > 60
+    if best is not None and dist < gun_range and not feint:
+        # A target in range: turn and shoot, thrusting back toward the slot when facing it.
+        desired = aim
+        thrust = need and abs(wrap_angle(to_slot - s.a)) < 0.6
+    elif need:
+        desired = to_slot
+        thrust = abs(wrap_angle(desired - s.a)) < 0.5
+    else:
+        desired = aim if best is not None and dist < gun_range * 1.2 else heading
+        thrust = False
+
+    ax, ay, threat = _threats(sim, s)
     if threat > 0.35:
         desired = math.atan2(ay, ax)
         thrust = abs(wrap_angle(desired - s.a)) < 1.0

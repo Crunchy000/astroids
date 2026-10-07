@@ -172,7 +172,7 @@ python examples/gauntlet.py results/attention_best.zip results/population_best.z
 python examples/plot_gauntlet.py g.json --out gauntlet.png
 ```
 
-Elo inside one population only says who beats whom *there*. The gauntlet scores a team against fixed, varied opponents on fresh battle seeds, from both sides: the default bots; three bot styles that punish different weaknesses (`bots:rusher` charges to point-blank range, `bots:sniper` holds at long range, `bots:zone` sits in the control zone); and a hall of fame (league striker, m16, the attention model and Colab m08; a team never plays itself). The gauntlet score is the mean win rate, so it only goes up if a team gets better against everything. The scores published up to and including the first Colab run used the original two-model hall of fame (league striker, m16).
+Elo inside one population only says who beats whom *there*. The gauntlet scores a team against fixed, varied opponents on fresh battle seeds, from both sides: the default bots; three bot styles that punish different weaknesses (`bots:rusher` charges to point-blank range, `bots:sniper` holds at long range, `bots:zone` sits in the control zone); a hall of fame (league striker, m16, the attention model and Colab m08; a team never plays itself); and three bot teams that fly in formation (`bots:wedge`, `bots:line`, `bots:falsegap`, below). The gauntlet score is the mean win rate, so it only goes up if a team gets better against everything. The scores published up to and including the first Colab run used the original two-model hall of fame (league striker, m16) and no formation bots.
 
 ### Training upgrades
 
@@ -247,6 +247,28 @@ Six attention-model teams, all starting from the attention model with three rewa
 | Attention model (start) | 91% | 70% | 90% | 95% |
 
 Head to head on 100 fresh battles, m08 beat the attention model it started from 66% of the time, though by a small average margin (+1.7 points per battle). Model `results/colab_population_best.zip`; charts `results/gauntlet.png`, `results/colab_population_{elo,lineage}.png`; video: [m08 vs the attention model](results/colab_best_vs_attention.mp4) (one of the battles m08 loses, 25.8 to 26.1).
+
+### Formation bots: wedge, line and false gap
+
+```bash
+python examples/record_match.py --blue bots:wedge --red bots --out wedge.mp4
+```
+
+Three new scripted bot styles fly as a team (`astroids_gym/bot.py`, `formation_action`). Each ship takes a slot in a shape centred on its team's centre of mass and facing the objective (the control zone while the enemy is far, then the enemy). Slots go left to right in the order the ships already stand, so nobody crosses over, and each ship holds station by thrusting along its velocity error, turning round to brake. With a target in range a ship turns and shoots, and thrusts back toward its slot when it happens to face it.
+
+* **`bots:wedge`**: a leader in front, the others swept back on both sides.
+* **`bots:line`**: shoulder to shoulder, 70 px apart.
+* **`bots:falsegap`**: a line with a hole in the middle. When the enemy comes within range, the centre falls back to draw them into the hole while the flanks push forward and close in. Once the enemy is inside 60% of gun range, everyone fights.
+
+The arena is small, so the shapes mostly show on the approach and when a team regroups: contact comes about 2 to 3 seconds after the start, and then it turns into a close fight. Even so, flying together pays off. Against the other bots (40 battles each, from both sides):
+
+| Formation | vs default bots | vs rusher | vs sniper | vs zone |
+|---|---|---|---|---|
+| Wedge | 98% | 92% | 100% | 90% |
+| Line | 98% | 92% | 100% | 90% |
+| False gap | 80% | 90% | 100% | 65% |
+
+The false gap wins less often because its centre gives up the control zone while it falls back. The three styles are on the gauntlet (after the hall of fame, so the other opponents keep their battle seeds) and in `train_population.py`'s opponent pool. Videos: [wedge vs bots](results/formation_wedge_vs_bots.mp4) · [line vs bots](results/formation_line_vs_bots.mp4) · [false gap vs bots](results/formation_falsegap_vs_bots.mp4).
 
 ### Where the training time goes
 

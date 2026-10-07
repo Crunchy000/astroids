@@ -335,3 +335,41 @@ def test_policy_bank_matches_numpy_and_tournaments_agree(tmp_path):
         assert (NumpyPolicy(spec)(x) == bank.act(spec, x, sample=False)).all()
     jobs = [(specs[0], "bots", 11, "competitive"), ("bots:rusher", specs[0], 12, "competitive")]
     assert play_matches(jobs, workers=2) == play_matches(jobs, workers=2, bank=bank)
+
+
+def test_formation_bots_hold_their_shape():
+    """Before contact, a line is wide and shallow and a wedge is swept back."""
+    from astroids_gym.bot import scripted_action
+
+    def shape(style):
+        sim = Simulation(Config.competitive(asteroids=False, width=3000, height=1800), seed=1)
+        for _ in range(60 * 3):  # red sits still, far away
+            sim.step({s.id: scripted_action(sim, s, 1, style) if s.team == 0 else (0.0, False, False)
+                      for s in sim.ships})
+        team = [s for s in sim.ships if s.team == 0 and s.alive]
+        ref = team[0]
+        pts = np.array([(sim.wdx(ref.x, s.x), sim.wdy(ref.y, s.y)) for s in team])
+        pts -= pts.mean(axis=0)
+        to_red = np.mean([(sim.wdx(ref.x, s.x), sim.wdy(ref.y, s.y)) for s in sim.ships if s.team == 1], axis=0)
+        f = to_red / np.linalg.norm(to_red)
+        fwd, lat = pts @ f, pts @ np.array([-f[1], f[0]])
+        return fwd, lat
+
+    fwd, lat = shape("line")
+    assert np.ptp(lat) > 250 and np.ptp(fwd) < 60
+    fwd, lat = shape("wedge")
+    lead = np.argmax(fwd)  # the leader flies in the middle, the wings behind it
+    assert np.ptp(fwd) > 80 and abs(lat[lead]) < 50
+
+
+def test_formation_bots_fight():
+    from astroids_gym.bot import FORMATIONS, scripted_action
+
+    for k, style in enumerate(FORMATIONS):
+        sim = Simulation(Config.competitive(), seed=30 + k)
+        shots = [0, 0]
+        while not sim.over:
+            ev = sim.step({s.id: scripted_action(sim, s, 1, style if s.team == 0 else None) for s in sim.ships})
+            for s in sim.ships:
+                shots[s.team] += ev.shots[s.id]
+        assert shots[0] > 100 and sim.team_score(0) > 0, style

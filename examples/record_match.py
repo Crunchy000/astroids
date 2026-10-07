@@ -3,7 +3,7 @@
     python examples/record_match.py --blue league/models/striker_r12.npz --red bots --out videos/striker_vs_bots.mp4
     python examples/record_match.py --blue league/models/striker_r12.npz --red league/models/pack_r12.npz
 
-Each side is ``bots``, a league snapshot (``.npz``) or an SB3 model (``.zip``,
+Each side is ``bots`` (or ``bots:<style>``, e.g. ``bots:wedge``), a league snapshot (``.npz``) or an SB3 model (``.zip``,
 exported on the fly). ``--rules`` is ``competitive`` (default) or ``classic``.
 The battle runs until it ends (time limit or wipe-out) and the result banner
 is held for a few seconds.
@@ -24,7 +24,7 @@ FPS = 30
 
 def resolve(spec: str, tmp: str) -> str:
     """'bots' and .npz pass through; an SB3 .zip is exported to .npz."""
-    if spec == "bots" or spec.endswith(".npz"):
+    if spec.startswith("bots") or spec.endswith(".npz"):
         return spec
     from stable_baselines3 import PPO
     from league import export_policy
@@ -32,7 +32,7 @@ def resolve(spec: str, tmp: str) -> str:
 
 
 def label(spec: str) -> str:
-    return "bots" if spec == "bots" else os.path.splitext(os.path.basename(spec))[0]
+    return spec if spec.startswith("bots") else os.path.splitext(os.path.basename(spec))[0]
 
 
 def main():
