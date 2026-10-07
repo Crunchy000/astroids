@@ -172,7 +172,7 @@ python examples/gauntlet.py results/attention_best.zip results/population_best.z
 python examples/plot_gauntlet.py g.json --out gauntlet.png
 ```
 
-Elo inside one population only says who beats whom *there*. The gauntlet scores a team against fixed, varied opponents on fresh battle seeds, from both sides: the default bots; three bot styles that punish different weaknesses (`bots:rusher` charges to point-blank range, `bots:sniper` holds at long range, `bots:zone` sits in the control zone); and a hall of fame (league striker, m16). The gauntlet score is the mean win rate, so it only goes up if a team gets better against everything.
+Elo inside one population only says who beats whom *there*. The gauntlet scores a team against fixed, varied opponents on fresh battle seeds, from both sides: the default bots; three bot styles that punish different weaknesses (`bots:rusher` charges to point-blank range, `bots:sniper` holds at long range, `bots:zone` sits in the control zone); and a hall of fame (league striker, m16, the attention model and Colab m08; a team never plays itself). The gauntlet score is the mean win rate, so it only goes up if a team gets better against everything. The scores published up to and including the first Colab run used the original two-model hall of fame (league striker, m16).
 
 ### Training upgrades
 
