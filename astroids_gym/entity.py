@@ -18,6 +18,8 @@ tournaments, which never import torch). ``tests`` check the two agree.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 from .obs import ASTEROID_DIM, BULLET_DIM, ENEMY_DIM, RULES_DIM, SELF_DIM, SHIP_DIM, ObsConfig
@@ -54,8 +56,9 @@ def entity_features(p: dict, obs: np.ndarray, oc: ObsConfig, heads: int) -> np.n
     obs = obs.astype(np.float32)
     n = obs.shape[0]
 
-    def lin(name, x):
-        return x @ p[name + ".weight"].T + p[name + ".bias"]
+    def lin(name, x):  # one 2-D matmul over all tokens (much faster than a stack of small ones)
+        w = p[name + ".weight"]
+        return (x.reshape(-1, x.shape[-1]) @ w.T + p[name + ".bias"]).reshape(*x.shape[:-1], w.shape[0])
 
     ctx = np.concatenate([obs[:, a:b] for a, b in context_slices(oc)], axis=1)
     toks, masks = [lin("ctx", ctx)[:, None]], [np.ones((n, 1), bool)]
@@ -70,7 +73,7 @@ def entity_features(p: dict, obs: np.ndarray, oc: ObsConfig, heads: int) -> np.n
     h = _layer_norm(x, p["ln1.weight"], p["ln1.bias"])
     q, k, v = np.split(lin("qkv", h), 3, axis=-1)
     q, k, v = (z.reshape(n, t, heads, dh).transpose(0, 2, 1, 3) for z in (q, k, v))
-    scores = q @ k.transpose(0, 1, 3, 2) / np.sqrt(dh)
+    scores = q @ k.transpose(0, 1, 3, 2) / math.sqrt(dh)  # a Python float keeps float32
     scores = np.where(mask[:, None, None, :], scores, -1e9)
     scores = np.exp(scores - scores.max(-1, keepdims=True))
     att = scores / scores.sum(-1, keepdims=True)
@@ -79,5 +82,5 @@ def entity_features(p: dict, obs: np.ndarray, oc: ObsConfig, heads: int) -> np.n
     x = x + lin("ff2", np.maximum(lin("ff1", _layer_norm(x, p["ln2.weight"], p["ln2.bias"])), 0.0))
 
     m = mask[:, 1:, None]
-    pooled = (x[:, 1:] * m).sum(1) / np.maximum(m.sum(1), 1)
+    pooled = (x[:, 1:] * m).sum(1) / np.maximum(m.sum(1), 1).astype(np.float32)
     return np.concatenate([x[:, 0], pooled], axis=1)
