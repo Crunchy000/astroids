@@ -140,6 +140,29 @@ Results on the competitive rules (`results/league_*`): 12 rounds of 1M ship-step
 
 On 60 fresh battles the striker won 42% (± 6%) against the bots and 87% against the starting champion. The survival-first guardian ended below where it started. Charts: `results/league_elo.png`, `results/league_matrix.png`; models: `results/league_{striker,pack,guardian}.zip`; videos: [striker vs bots](results/league_striker_vs_bots.mp4) · [striker vs pack](results/league_striker_vs_pack.mp4).
 
+## Population-based training: evolving teams
+
+```bash
+python examples/train_population.py \
+    --founders results/league_striker.zip:striker,results/league_pack.zip:pack,results/league_guardian.zip:guardian \
+    --size 8 --rounds 16
+python examples/plot_population.py population/population.json   # Elo/width chart + lineage map
+```
+
+Each member is a team model with a **genome**: its reward weights, learning rate, entropy bonus and network width. The population starts from founder models with mutated genomes. Every round, each member trains (against the others, past snapshots and the bots) and everyone plays a side-swapped tournament (Elo, bots = 1000). Every `--exploit-every` rounds, the bottom quarter is replaced by copies of the top quarter: weights, optimiser state and genome. Each copy then **mutates**: reward weights, learning rate and entropy are scaled by 0.8 or 1.25, and with probability `--p-grow` its network widens by 64 units per layer.
+
+**Networks can grow.** `grow_model()` (in `train_league.py`) widens a trained network without changing its play: old weights are copied, inputs from new units start at zero, and new units keep a random incoming init so they can learn. A grown network plays identically at first (same actions on every test observation, value estimates within 1e-6), and selection decides whether the extra capacity pays off. The same function adds new observation inputs.
+
+Results (`results/population_*`), 8 members, 16 rounds, about 3 hours on 4 cores: the guardian line died out by round 2 and pack by round 6, and striker descendants took over and kept improving. The median member rose from Elo ~660 to ~1260, and the best ended at 1311 (peak 1349). The winner, **m16** (m06 → m13 → m14 → m16, grown to 320 units in round 10), evolved to value kills (2.3 vs 1.5) and winning (3.75 vs 3.0) more, with a slower learning rate. On 60 fresh battles:
+
+| Matchup | Win rate |
+|---|---|
+| Evolved m16 vs built-in bots | **77% ± 5%** |
+| Evolved m16 vs league striker | **87% ± 4%** |
+| League striker vs built-in bots | 48% |
+
+Half the final population had grown networks (320 to 384 units). Bigger networks were often but not always selected: the first one grown (m11) was culled, while m15 and m16 (320) and m17 (384) reached the top. The model is `results/population_best.zip`; videos: [m16 vs bots](results/population_best_vs_bots.mp4) · [m16 vs league striker](results/population_best_vs_striker.mp4).
+
 ## Videos
 
 ```bash

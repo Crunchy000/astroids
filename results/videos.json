@@ -1,6 +1,60 @@
 {
   "sections": [
     {
+      "id": "population",
+      "title": "An evolving population of teams",
+      "summary": "Population-based training: 8 team models, each with a genome (reward weights, learning rate, exploration, network width), seeded from the three league finalists. Every 2 rounds the bottom quarter was replaced by mutated copies of the top quarter, and a copy could grow its network by 64 units per layer without changing its play. In 16 rounds (about 3 hours on 4 CPU cores) the guardian line died out by round 2 and pack by round 6; striker descendants took over and kept improving. The winner, m16 (four generations from the striker, grown to 320 units), beat the bots in 77% (± 5%) of 60 fresh battles and the league striker in 87%. Its genome evolved to value kills (2.3 vs 1.5) and winning (3.75 vs 3.0) more, with a slower learning rate. Half the final population had grown networks (320 to 384 units); bigger nets were often but not always selected.",
+      "table": {
+        "columns": [
+          "Matchup (60 fresh battles)",
+          "Win rate",
+          "Avg score margin"
+        ],
+        "rows": [
+          [
+            "Evolved m16 vs built-in bots",
+            "77% ± 5%",
+            "+3.2"
+          ],
+          [
+            "Evolved m16 vs league striker",
+            "87% ± 4%",
+            "+5.6"
+          ],
+          [
+            "League striker vs built-in bots",
+            "48%",
+            "—"
+          ]
+        ],
+        "highlight": 0
+      },
+      "charts": [
+        {
+          "src": "results/population_elo.png",
+          "alt": "Population Elo over 16 rounds with bots at 1000: the median member rises from about 660 to 1260 and the best from about 1000 to 1311-1349; network width rises from 256 to a mean of 312 and a maximum of 384 units."
+        },
+        {
+          "src": "results/population_lineage.png",
+          "alt": "Lineage of the 8 population slots over 16 rounds: guardian descendants disappear after round 2, pack after round 6, and every slot ends as a striker descendant."
+        }
+      ],
+      "videos": [
+        {
+          "src": "results/population_best_vs_bots.mp4",
+          "title": "Evolved m16 vs the bots",
+          "note": "Same battle seed as the other clips. Blue (m16) wins by wipe-out at 43 s, 30.3 to 28.8.",
+          "poster": "results/population_best_vs_bots.jpg"
+        },
+        {
+          "src": "results/population_best_vs_striker.mp4",
+          "title": "Evolved m16 vs the league striker",
+          "note": "The population's best against the league's best: blue (m16) wins 37.2 to 26.4.",
+          "poster": "results/population_best_vs_striker.jpg"
+        }
+      ]
+    },
+    {
       "id": "league",
       "title": "Teams of agents vs teams of agents",
       "summary": "Three team models with different reward personalities (striker: kills first; guardian: survival first; pack: fully shared team rewards and the zone) trained against each other, past snapshots and the bots for 12 rounds, about 1.5 hours on 4 CPU cores, under the competitive rules: control zone with reinforcements, weapon heat, 20 respawns, friendly fire, 384 px guns. All three started from the champion team model, which the bots beat 98% of the time under these rules: its spray-and-camp style kept its guns overheated 46% of the time. After an overheat penalty was added at round 4, the striker broke away and finished level with the bots. On 60 fresh battles it won 42% (± 6%) against the bots and 87% against the starting champion.",
