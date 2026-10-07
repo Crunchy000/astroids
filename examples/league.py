@@ -23,7 +23,7 @@ from itertools import combinations
 import numpy as np
 
 from astroids_gym import ACTION_SPACE, Config, RewardConfig, Simulation, decode_action, scripted_action
-from astroids_gym.obs import ObsConfig, encode_battle
+from astroids_gym.obs import ObsConfig, encode_battle, global_state
 from astroids_gym.sim import Events
 
 FRAME_SKIP = 2
@@ -38,11 +38,20 @@ def _hidden_keys(sd, net="policy_net") -> list[str]:
 
 
 def export_policy(model, path: str) -> str:
-    """Save an SB3 PPO policy's actor network (any depth/width) as a ``.npz`` for ``NumpyPolicy``."""
+    """Save an SB3 PPO policy's actor network (any depth/width) as a ``.npz`` for ``NumpyPolicy``.
+
+    With a centralised critic the actor only reads the first ``n_actor_inputs``
+    observation inputs (the rest is the global state, masked out), so only
+    those columns are exported and the NumPy policy takes the plain observation.
+    """
     sd = {k: v.detach().cpu().numpy() for k, v in model.policy.state_dict().items()}
+    n_in = getattr(model.policy, "n_actor_inputs", None)
     arrays = {}
     for i, k in enumerate(_hidden_keys(sd)):
-        arrays[f"w{i}"], arrays[f"b{i}"] = sd[k + ".weight"].T, sd[k + ".bias"]
+        w = sd[k + ".weight"].T
+        if i == 0 and n_in is not None:
+            w = w[:n_in]
+        arrays[f"w{i}"], arrays[f"b{i}"] = w, sd[k + ".bias"]
     arrays["wo"], arrays["bo"] = sd["action_net.weight"].T, sd["action_net.bias"]
     np.savez(path, **arrays)
     return path
@@ -135,9 +144,18 @@ def battle_over(b: Battle) -> tuple[bool, bool]:
     return eliminated or b.steps >= MAX_STEPS or b.sim.over, eliminated
 
 
-def _worker(remote, seed: int, n_battles: int, rules: str = "classic"):
+def _worker(remote, seed: int, n_battles: int, rules: str = "classic", central: bool = False):
     rng = np.random.default_rng(seed)
     cfg, oc = make_rules(rules)
+
+    def learner_obs(b):
+        """Learner ships' observations; with ``central``, the global battle state is appended."""
+        o = b.obs(b.side, oc)
+        if not central:
+            return o
+        g = global_state(b.sim, b.side)
+        return np.concatenate([o, np.broadcast_to(g, (len(o), len(g)))], axis=1)
+
     reward = RewardConfig()
     opponents: list[tuple[str, float]] = [("bots", 1.0)]
 
@@ -177,7 +195,7 @@ def _worker(remote, seed: int, n_battles: int, rules: str = "classic"):
                     end = reward.final(b.sim, b.side)
                     r = [x + end for x in r]
                 rew_out.append(np.array([r[i] for i in b.ids[b.side]], dtype=np.float32))
-                o = b.obs(b.side, oc)
+                o = learner_obs(b)
                 done_out.append((over, eliminated))
                 final_out.append(o)
                 if over:
@@ -186,12 +204,12 @@ def _worker(remote, seed: int, n_battles: int, rules: str = "classic"):
                     results.append((b.opp, sim.team_score(me) - sim.team_score(1 - me),
                                     0 if w < 0 else (1 if w == me else -1)))
                     battles[k] = b = new_battle()
-                    o = b.obs(b.side, oc)
+                    o = learner_obs(b)
                 obs_out.append(o)
             remote.send((np.concatenate(obs_out), np.concatenate(rew_out), done_out, final_out, results))
         elif cmd == "reset":
             battles = [new_battle() for _ in range(n_battles)]
-            remote.send(np.concatenate([b.obs(b.side, oc) for b in battles]))
+            remote.send(np.concatenate([learner_obs(b) for b in battles]))
         elif cmd == "configure":
             if "reward" in data:
                 reward = RewardConfig(**data["reward"])

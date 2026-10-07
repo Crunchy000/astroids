@@ -37,7 +37,7 @@ from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import VecEnv
 
 from astroids_gym import ACTION_SPACE, Config
-from astroids_gym.obs import observation_space
+from astroids_gym.obs import global_state_dim, observation_space
 from league import _worker, export_policy, fit_elo, make_rules, tournament, win_matrix
 
 # Shared by every personality: zone points, the battle result, friendly fire and
@@ -55,27 +55,40 @@ PERSONALITIES = {
                  "friendly_hit": -0.5},
     # Every ship gets its teammates' kills and deaths in full, and it plays the objective.
     "pack": {**_BASE, "kill": 1.0, "death": -1.0, "team_spirit": 1.0, "zone": 0.25},
+    # The reward genome that evolved in the first population run (member m16, a
+    # striker descendant): kills and the win matter more, being hit a bit less.
+    "evolved": {"hit_dealt": 0.192, "hit_taken": -0.1562, "zone": 0.125, "win": 3.75, "friendly_hit": -0.3,
+                "overheat": -0.2, "shot": -0.008, "kill": 2.3438, "death": -0.5, "team_spirit": 0.24},
 }
 
 
 class LeagueVecEnv(VecEnv):
-    """``n_workers`` processes x ``battles_per_worker`` battles x 5 learner ships = env slots."""
+    """``n_workers`` processes x ``battles_per_worker`` battles x 5 learner ships = env slots.
+
+    With ``central=True`` each observation is followed by the global battle
+    state, for ``CentralCriticPolicy`` (``n_actor_inputs`` is the plain size).
+    """
 
     def __init__(self, n_workers: int = 4, battles_per_worker: int = 4, seed: int = 0,
-                 rules: str = "classic"):
+                 rules: str = "classic", central: bool = False):
         self.team_size = Config().team_size
         self.per_worker = battles_per_worker * self.team_size
         ctx = mp.get_context("forkserver" if "forkserver" in mp.get_all_start_methods() else "spawn")
         self.remotes, self.procs = [], []
         for i in range(n_workers):
             local, remote = ctx.Pipe()
-            p = ctx.Process(target=_worker, args=(remote, seed + 1000 * i, battles_per_worker, rules),
+            p = ctx.Process(target=_worker, args=(remote, seed + 1000 * i, battles_per_worker, rules, central),
                             daemon=True)
             p.start()
             remote.close()
             self.remotes.append(local)
             self.procs.append(p)
-        super().__init__(n_workers * self.per_worker, observation_space(make_rules(rules)[1]), ACTION_SPACE)
+        cfg, oc = make_rules(rules)
+        self.central = central
+        self.n_actor_inputs = oc.size
+        n_obs = oc.size + (global_state_dim(cfg) if central else 0)
+        space = observation_space(oc) if not central else type(observation_space(oc))(-1.0, 1.0, (n_obs,), np.float32)
+        super().__init__(n_workers * self.per_worker, space, ACTION_SPACE)
         self.ep_ret = np.zeros(self.num_envs, dtype=np.float32)
         self.ep_len = np.zeros(self.num_envs, dtype=np.int64)
         self.results: list[tuple[str, float, int]] = []  # (opponent, score margin, outcome) per battle
@@ -165,7 +178,7 @@ class ThreadSwitch(BaseCallback):
 
 
 def net_widths(model) -> list[int]:
-    """Hidden-layer widths of a PPO policy network."""
+    """Hidden-layer widths of a PPO policy (actor) network."""
     sd = model.policy.state_dict()
     idx = sorted(int(k.split(".")[2]) for k in sd if k.startswith("mlp_extractor.policy_net.") and k.endswith(".weight"))
     return [sd[f"mlp_extractor.policy_net.{i}.weight"].shape[0] for i in idx]
@@ -174,17 +187,22 @@ def net_widths(model) -> list[int]:
 def grow_model(old: PPO, venv, hyper: dict, seed: int, widths: list[int] | None = None) -> PPO:
     """A new PPO for ``venv`` that behaves exactly like ``old``, possibly bigger.
 
-    Handles more observation inputs (the competitive rules' extra features) and
-    wider hidden layers. Every old weight is copied; the extra *input* columns of
-    each layer (new observation inputs, or new hidden units feeding the next
-    layer) start at zero, so the new parts add nothing to the output yet. New
-    hidden units keep a random incoming init, so they still get gradient and the
-    network can learn to use them. The optimiser starts fresh.
+    Handles more observation inputs (the competitive rules' extra features, or
+    the global state for a centralised critic) and wider hidden layers. Every
+    old weight is copied; the extra *input* columns of each layer (new
+    observation inputs, or new hidden units feeding the next layer) start at
+    zero, so the new parts add nothing to the output yet. New hidden units keep
+    a random incoming init, so they still get gradient and the network can learn
+    to use them. The optimiser starts fresh. If ``venv.central`` is set, the new
+    model uses ``CentralCriticPolicy`` (an ``MlpPolicy`` model converts to one).
     """
     widths = widths or net_widths(old)
-    model = PPO("MlpPolicy", venv, n_epochs=old.n_epochs, gamma=old.gamma, gae_lambda=old.gae_lambda,
-                clip_range=0.2, policy_kwargs={"net_arch": list(widths)}, seed=seed, device="cpu",
-                verbose=0, **hyper)
+    policy, kwargs = "MlpPolicy", {"net_arch": list(widths)}
+    if getattr(venv, "central", False):
+        from astroids_gym.policies import CentralCriticPolicy
+        policy, kwargs["n_actor_inputs"] = CentralCriticPolicy, venv.n_actor_inputs
+    model = PPO(policy, venv, n_epochs=old.n_epochs, gamma=old.gamma, gae_lambda=old.gae_lambda,
+                clip_range=0.2, policy_kwargs=kwargs, seed=seed, device="cpu", verbose=0, **hyper)
     old_sd, new_sd = old.policy.state_dict(), model.policy.state_dict()
     for k, v in new_sd.items():
         o = old_sd[k]

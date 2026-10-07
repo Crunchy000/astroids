@@ -218,3 +218,48 @@ def test_zone_reinforcements():
         sim.step({})
     assert 3.4 < sim.points[0] < 3.6 and sim.points[1] == 0
     assert sim.lives[0] == lives + 1 and sim.reinforcements[0] == 1
+
+
+def test_global_state_is_mirrored_for_red():
+    from astroids_gym.obs import SHIP_STATE_DIM, global_state, global_state_dim
+
+    sim = Simulation(Config.competitive(), seed=3)
+    for _ in range(30):
+        sim.step({s.id: scripted_action(sim, s) for s in sim.ships})
+    blue, red = global_state(sim, 0), global_state(sim, 1)
+    assert blue.shape == red.shape == (global_state_dim(sim.cfg),)
+    assert np.all(np.abs(blue) <= 1.0)
+    n = sim.cfg.team_size * SHIP_STATE_DIM
+    w, h = sim.cfg.width, sim.cfg.height
+    r0 = sim.ships[5]
+    assert red[1] == pytest.approx(1 - r0.x / w, abs=1e-5) and red[2] == pytest.approx(1 - r0.y / h, abs=1e-5)
+    # Each team's own block comes first; alive flags, hp and heat do not depend on the viewpoint.
+    for k in (0, 7, 8):
+        assert np.allclose(blue[k:n:SHIP_STATE_DIM], red[n + k:2 * n:SHIP_STATE_DIM])
+
+
+def test_central_critic_policy_matches_mlp_actor():
+    pytest.importorskip("stable_baselines3")
+    import torch
+    from gymnasium import spaces
+    from stable_baselines3.common.policies import ActorCriticPolicy
+
+    from astroids_gym import ACTION_SPACE
+    from astroids_gym.policies import CentralCriticPolicy
+
+    n, g = 12, 5
+    pol = CentralCriticPolicy(spaces.Box(-1, 1, (n + g,), np.float32), ACTION_SPACE, lambda _: 1e-3,
+                              net_arch=[16, 16], n_actor_inputs=n)
+    ref = ActorCriticPolicy(spaces.Box(-1, 1, (n,), np.float32), ACTION_SPACE, lambda _: 1e-3, net_arch=[16, 16])
+    ref.mlp_extractor.policy_net.load_state_dict(pol.mlp_extractor.policy_net.state_dict())
+    ref.action_net.load_state_dict(pol.action_net.state_dict())
+    x = torch.rand(4, n + g) * 2 - 1
+    with torch.no_grad():
+        a = torch.cat([d.logits for d in pol.get_distribution(x).distribution], 1)
+        b = torch.cat([d.logits for d in ref.get_distribution(x[:, :n]).distribution], 1)
+        assert torch.allclose(a, b)
+        y = x.clone()
+        y[:, n:] = 0  # the critic reads the global inputs, the actor does not
+        assert not torch.allclose(pol.predict_values(x), pol.predict_values(y))
+        assert torch.allclose(pol.get_distribution(y).distribution[0].logits, pol.get_distribution(x).distribution[0].logits)
+    assert pol.mlp_extractor.value_net[0].in_features == n + g

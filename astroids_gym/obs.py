@@ -177,3 +177,43 @@ def encode_battle(sim: Simulation, ids, oc: ObsConfig) -> np.ndarray:
         except ImportError:
             _fast = lambda sim, ids, oc: np.stack([encode(sim, sim.ships[i], oc) for i in ids])  # noqa: E731
     return _fast(sim, ids, oc)
+
+
+SHIP_STATE_DIM = 11
+GLOBAL_EXTRA_DIM = 9
+
+
+def global_state_dim(cfg) -> int:
+    return 2 * cfg.team_size * SHIP_STATE_DIM + GLOBAL_EXTRA_DIM
+
+
+def global_state(sim: Simulation, team: int) -> np.ndarray:
+    """The whole battle as seen from ``team``'s side, for a centralised critic.
+
+    Positions, velocities and headings are rotated 180 degrees for red, so
+    "our ships" always start on the left; own team first, then the enemy, each
+    in ship order: alive, x, y, vx, vy, sin(a), cos(a), hp, heat, overheated,
+    respawn timer. Then: respawns left (own, enemy), zone points (own, enemy),
+    kills (own, enemy), ships in the zone (own, enemy), time remaining.
+    """
+    cfg = sim.cfg
+    w, h = cfg.width, cfg.height
+    flip = team == 1
+    out = []
+    for t in (team, 1 - team):
+        for s in sim.ships:
+            if s.team != t:
+                continue
+            x, y, vx, vy, a = s.x, s.y, s.vx, s.vy, s.a
+            if flip:
+                x, y, vx, vy, a = w - x, h - y, -vx, -vy, a + math.pi
+            out += [float(s.alive), x / w, y / h, vx / cfg.max_speed, vy / cfg.max_speed,
+                    math.sin(a), math.cos(a), s.hp / cfg.ship_hp, s.heat, float(s.overheated),
+                    max(s.respawn, 0.0) / max(cfg.respawn_time, 1e-6) if not s.alive else 0.0]
+    lives = [(sim.lives[t] / cfg.team_lives if cfg.team_lives else 1.0) for t in (team, 1 - team)]
+    inside = sim.zone_counts() if cfg.zone else [0, 0]
+    out += [*lives, sim.points[team] / 30.0, sim.points[1 - team] / 30.0,
+            sim.score[team] / 40.0, sim.score[1 - team] / 40.0,
+            inside[team] / cfg.team_size, inside[1 - team] / cfg.team_size,
+            max(0.0, 1.0 - sim.time / cfg.battle_seconds)]
+    return np.clip(np.array(out, dtype=np.float32), -1.0, 1.0)
