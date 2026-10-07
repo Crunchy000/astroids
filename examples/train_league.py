@@ -164,29 +164,49 @@ class ThreadSwitch(BaseCallback):
         return True
 
 
-def warm_start(init_path: str, venv, hyper: dict, seed: int) -> PPO:
-    """A new PPO for ``venv`` initialised from a saved model.
+def net_widths(model) -> list[int]:
+    """Hidden-layer widths of a PPO policy network."""
+    sd = model.policy.state_dict()
+    idx = sorted(int(k.split(".")[2]) for k in sd if k.startswith("mlp_extractor.policy_net.") and k.endswith(".weight"))
+    return [sd[f"mlp_extractor.policy_net.{i}.weight"].shape[0] for i in idx]
 
-    If the env has more observation inputs than the saved model (extended
-    competitive observations), the extra input columns of the first layers start
-    at zero, so the new model initially plays exactly like the old one.
+
+def grow_model(old: PPO, venv, hyper: dict, seed: int, widths: list[int] | None = None) -> PPO:
+    """A new PPO for ``venv`` that behaves exactly like ``old``, possibly bigger.
+
+    Handles more observation inputs (the competitive rules' extra features) and
+    wider hidden layers. Every old weight is copied; the extra *input* columns of
+    each layer (new observation inputs, or new hidden units feeding the next
+    layer) start at zero, so the new parts add nothing to the output yet. New
+    hidden units keep a random incoming init, so they still get gradient and the
+    network can learn to use them. The optimiser starts fresh.
     """
-    old = PPO.load(init_path, device="cpu")
+    widths = widths or net_widths(old)
     model = PPO("MlpPolicy", venv, n_epochs=old.n_epochs, gamma=old.gamma, gae_lambda=old.gae_lambda,
-                clip_range=0.2, policy_kwargs={"net_arch": [256, 256]}, seed=seed, device="cpu",
+                clip_range=0.2, policy_kwargs={"net_arch": list(widths)}, seed=seed, device="cpu",
                 verbose=0, **hyper)
     old_sd, new_sd = old.policy.state_dict(), model.policy.state_dict()
     for k, v in new_sd.items():
         o = old_sd[k]
         if o.shape == v.shape:
             new_sd[k] = o.clone()
-        else:
-            assert o.dim() == 2 and o.shape[0] == v.shape[0] and o.shape[1] < v.shape[1], k
-            w = torch.zeros_like(v)
-            w[:, :o.shape[1]] = o
-            new_sd[k] = w
+            continue
+        assert o.dim() == v.dim() and all(a <= b for a, b in zip(o.shape, v.shape)), k
+        w = v.clone()
+        if o.dim() == 2:
+            w[:, o.shape[1]:] = 0.0  # new inputs feed nothing yet
+            w[:o.shape[0], :o.shape[1]] = o
+        else:  # bias: new units start at zero
+            w[o.shape[0]:] = 0.0
+            w[:o.shape[0]] = o
+        new_sd[k] = w
     model.policy.load_state_dict(new_sd)
     return model
+
+
+def warm_start(init_path: str, venv, hyper: dict, seed: int) -> PPO:
+    """A new PPO for ``venv`` initialised from a saved model (see ``grow_model``)."""
+    return grow_model(PPO.load(init_path, device="cpu"), venv, hyper, seed)
 
 
 def opponent_mix(name, latest, snapshots, rng, bots_share=0.2, max_snapshots=6):

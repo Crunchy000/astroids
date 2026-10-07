@@ -31,20 +31,37 @@ MAX_STEPS = 1800  # 60 s battles
 SPLITS = np.cumsum(ACTION_SPACE.nvec)[:-1]  # logits layout [5 | 2 | 2]
 
 # ---- policies -------------------------------------------------------------------
+def _hidden_keys(sd, net="policy_net") -> list[str]:
+    """Weight keys of the Linear layers in an SB3 MLP extractor, in order (any depth)."""
+    idx = sorted(int(k.split(".")[2]) for k in sd if k.startswith(f"mlp_extractor.{net}.") and k.endswith(".weight"))
+    return [f"mlp_extractor.{net}.{i}" for i in idx]
+
+
 def export_policy(model, path: str) -> str:
-    """Save an SB3 PPO policy's actor network as a ``.npz`` for ``NumpyPolicy``."""
+    """Save an SB3 PPO policy's actor network (any depth/width) as a ``.npz`` for ``NumpyPolicy``."""
     sd = {k: v.detach().cpu().numpy() for k, v in model.policy.state_dict().items()}
-    np.savez(path, w0=sd["mlp_extractor.policy_net.0.weight"].T, b0=sd["mlp_extractor.policy_net.0.bias"],
-             w1=sd["mlp_extractor.policy_net.2.weight"].T, b1=sd["mlp_extractor.policy_net.2.bias"],
-             w2=sd["action_net.weight"].T, b2=sd["action_net.bias"])
+    arrays = {}
+    for i, k in enumerate(_hidden_keys(sd)):
+        arrays[f"w{i}"], arrays[f"b{i}"] = sd[k + ".weight"].T, sd[k + ".bias"]
+    arrays["wo"], arrays["bo"] = sd["action_net.weight"].T, sd["action_net.bias"]
+    np.savez(path, **arrays)
     return path
 
 
 class NumpyPolicy:
     def __init__(self, path: str):
         d = np.load(path)
-        self.layers = [(d["w0"], d["b0"]), (d["w1"], d["b1"])]
-        self.out = (d["w2"], d["b2"])
+        if "wo" in d:  # any depth
+            n = sum(1 for k in d.files if k.startswith("w") and k != "wo")
+            self.layers = [(d[f"w{i}"], d[f"b{i}"]) for i in range(n)]
+            self.out = (d["wo"], d["bo"])
+        else:  # original two-hidden-layer files
+            self.layers = [(d["w0"], d["b0"]), (d["w1"], d["b1"])]
+            self.out = (d["w2"], d["b2"])
+
+    @property
+    def widths(self) -> list[int]:
+        return [w.shape[1] for w, _ in self.layers]
 
     def __call__(self, obs: np.ndarray, rng: np.random.Generator | None = None) -> np.ndarray:
         """Actions for a batch of observations: argmax, or sampled when ``rng`` is given."""
