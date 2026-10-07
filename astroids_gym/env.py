@@ -45,6 +45,17 @@ class RewardConfig:
     # ``aim_width`` radians). Leave at 0 for the true game score.
     aim: float = 0.0
     aim_width: float = 0.15
+    # Competitive rules: per control-zone point the own team gains (minus the
+    # enemy's gains), per friendly-fire hit landed, and once at the end of a
+    # battle for the result (+win / -win / 0 for a draw).
+    zone: float = 0.0
+    friendly_hit: float = 0.0
+    win: float = 0.0
+
+    def final(self, sim: Simulation, team: int) -> float:
+        """End-of-battle reward for a ship on ``team``."""
+        w = sim.winner()
+        return 0.0 if w < 0 else self.win * (1.0 if w == team else -1.0)
 
     def aim_bonus(self, sim: Simulation, s) -> float:
         if not s.alive:
@@ -64,12 +75,15 @@ class RewardConfig:
     def individual(self, ev: Events, i: int) -> float:
         return (self.kill * ev.kills[i] + self.death * ev.deaths[i]
                 + self.hit_dealt * ev.hits_dealt[i] + self.hit_taken * ev.hits_taken[i]
-                + self.shot * ev.shots[i])
+                + self.shot * ev.shots[i] + self.friendly_hit * ev.team_hits[i])
 
     def rewards(self, sim: Simulation, ev: Events) -> list[float]:
         own = [self.individual(ev, i) for i in range(sim.n_ships)]
         if self.aim:
             own = [r + self.aim_bonus(sim, s) for r, s in zip(own, sim.ships)]
+        if self.zone:
+            zp = ev.zone_points
+            own = [r + self.zone * (zp[s.team] - zp[1 - s.team]) for r, s in zip(own, sim.ships)]
         if not self.team_spirit:
             return own
         team_kd = [0.0, 0.0]
@@ -198,8 +212,12 @@ class AsteroidsBattleEnv(_Match, gym.Env):
             act = decode_action(action)
         ev = self._advance({self.controlled: act}, self.policies, self.np_random)
         reward = self.reward_cfg.rewards(self.sim, ev)[self.controlled]
-        terminated = self.terminate_on_death and ev.deaths[self.controlled] > 0
-        truncated = self._steps >= self.max_steps
+        sim = self.sim
+        eliminated = sim.eliminated(0) or sim.eliminated(1)
+        terminated = eliminated or (self.terminate_on_death and ev.deaths[self.controlled] > 0)
+        truncated = not terminated and (self._steps >= self.max_steps or sim.over)
+        if eliminated or truncated:
+            reward += self.reward_cfg.final(sim, sim.ships[self.controlled].team)
         if self.render_mode == "human":
             self.render()
         return self._obs(self.controlled), float(reward), terminated, truncated, self._info()
@@ -212,7 +230,7 @@ class AsteroidsBattleEnv(_Match, gym.Env):
     def _info(self) -> dict:
         me = self.sim.ships[self.controlled]
         return {"kills": me.kills, "deaths": me.deaths, "alive": me.alive,
-                "score": tuple(self.sim.score), "time": self.sim.time}
+                "score": tuple(self.sim.score), "points": tuple(self.sim.points), "time": self.sim.time}
 
 
 try:  # Subclass PettingZoo's ParallelEnv when it's installed, for its tooling/wrappers.
@@ -226,8 +244,9 @@ class AsteroidsBattleParallelEnv(_Match, _ParallelBase):
 
     Agents are named ``blue_0..blue_4`` and ``red_0..red_4``. By default every
     ship is a learning agent; pass ``learning_teams=("blue",)`` to train blue
-    against the scripted red team. Ships respawn, so agents are never removed
-    and the episode ends for everyone at ``max_steps`` (truncation).
+    against the scripted red team. Agents are never removed mid-battle; the
+    episode ends for everyone at ``max_steps`` (truncation) or, with limited
+    lives, when a team is wiped out (termination).
     """
 
     TEAM_NAMES = ("blue", "red")
@@ -273,13 +292,18 @@ class AsteroidsBattleParallelEnv(_Match, _ParallelBase):
         learner = {self._ids[a]: decode_action(act) for a, act in actions.items()}
         ev = self._advance(learner, self.policies, self._rng)
         rewards = self.reward_cfg.rewards(self.sim, ev)
-        done = self._steps >= self.max_steps
+        sim = self.sim
+        eliminated = sim.eliminated(0) or sim.eliminated(1)
+        timed_out = not eliminated and (self._steps >= self.max_steps or sim.over)
+        if eliminated or timed_out:
+            for i in self._ids.values():
+                rewards[i] += self.reward_cfg.final(sim, sim.ships[i].team)
         obs = self._agent_obs()
         rew = {a: float(rewards[i]) for a, i in self._ids.items()}
-        term = {a: False for a in self.agents}
-        trunc = {a: done for a in self.agents}
+        term = {a: eliminated for a in self.agents}
+        trunc = {a: timed_out for a in self.agents}
         infos = {a: self._info(i) for a, i in self._ids.items()}
-        if done:
+        if eliminated or timed_out:
             self.agents = []
         if self.render_mode == "human":
             self.render()
@@ -300,4 +324,4 @@ class AsteroidsBattleParallelEnv(_Match, _ParallelBase):
     def _info(self, ship_id: int) -> dict:
         s = self.sim.ships[ship_id]
         return {"kills": s.kills, "deaths": s.deaths, "alive": s.alive,
-                "score": tuple(self.sim.score)}
+                "score": tuple(self.sim.score), "points": tuple(self.sim.points)}

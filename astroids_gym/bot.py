@@ -73,6 +73,15 @@ def scripted_action(sim: Simulation, s: Ship, horizon: int = 1) -> Action:
         s.wander += sim.rand(-1, 1) * cfg.dt * horizon
         desired = s.a + s.wander
 
+    # Control zone: with no enemy close by, go and hold the centre.
+    if cfg.zone and (best is None or best_d > 380):
+        zx, zy = sim.wdx(s.x, cfg.width / 2), sim.wdy(s.y, cfg.height / 2)
+        zd = math.hypot(zx, zy)
+        if zd > cfg.zone_radius * 0.5:
+            desired = math.atan2(zy, zx)
+            thrust = abs(wrap_angle(desired - s.a)) < 0.5 and math.hypot(s.vx, s.vy) < 150
+        fire = fire and best is not None
+
     # Dodge enemy bullets heading our way and nearby asteroids.
     ax = ay = threat = 0.0
     ww, wh = cfg.width, cfg.height

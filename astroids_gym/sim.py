@@ -39,6 +39,23 @@ class Config:
     asteroid_count: int = 7
     min_asteroids: int = 3
     dt: float = 1 / 60
+    battle_seconds: float = 60.0
+    # ---- competitive rules (all off by default: the classic game) ----
+    zone: bool = False  # control zone in the centre; the team with more ships inside scores
+    zone_radius: float = 130.0
+    zone_rate: float = 1.0  # points per second while holding the zone
+    heat: bool = False  # weapon heat: guns lock when overheated
+    heat_per_shot: float = 0.25
+    heat_cooling: float = 0.35  # per second
+    heat_resume: float = 0.5  # an overheated gun fires again once cooled to this
+    team_lives: int = 0  # respawns per team (0 = unlimited); a wiped-out team with none left loses
+    friendly_fire: bool = False  # bullets hit teammates (never the shooter)
+
+    @classmethod
+    def competitive(cls, **overrides) -> "Config":
+        """All four competitive rules on: control zone, heat, limited lives, friendly fire."""
+        rules = dict(zone=True, heat=True, team_lives=20, respawn_time=4.0, friendly_fire=True)
+        return cls(**{**rules, **overrides})
 
 
 def wrap_angle(a: float) -> float:
@@ -48,7 +65,7 @@ def wrap_angle(a: float) -> float:
 class Ship:
     __slots__ = (
         "id", "team", "x", "y", "vx", "vy", "a", "hp", "cool", "invuln",
-        "alive", "respawn", "thrusting", "kills", "deaths",
+        "alive", "respawn", "thrusting", "kills", "deaths", "heat", "overheated",
         # scripted-bot personality
         "wander", "aggro", "pref_dist", "target",
     )
@@ -61,6 +78,8 @@ class Ship:
         self.alive = False
         self.respawn = 0.0
         self.thrusting = False
+        self.heat = 0.0
+        self.overheated = False
         self.target: Ship | None = None
 
 
@@ -85,9 +104,11 @@ class Events:
         self.kills = [0] * n
         self.deaths = [0] * n
         self.shots = [0] * n
+        self.team_hits = [0] * n  # friendly-fire hits this ship landed on teammates
+        self.zone_points = [0.0, 0.0]  # per team
 
     def merge(self, other: "Events") -> None:
-        for name in ("hits_dealt", "hits_taken", "kills", "deaths", "shots"):
+        for name in ("hits_dealt", "hits_taken", "kills", "deaths", "shots", "team_hits", "zone_points"):
             mine, theirs = getattr(self, name), getattr(other, name)
             for i, v in enumerate(theirs):
                 mine[i] += v
@@ -130,7 +151,9 @@ class Simulation:
             self.rng = np.random.default_rng(seed)
         cfg = self.cfg
         self.time = 0.0
-        self.score = [0, 0]
+        self.score = [0, 0]  # kills
+        self.points = [0.0, 0.0]  # control-zone points
+        self.lives = [cfg.team_lives, cfg.team_lives]  # respawns left (used when team_lives > 0)
         self.ships = [Ship(i, i // cfg.team_size) for i in range(self.n_ships)]
         for s in self.ships:
             self._spawn_ship(s)
@@ -158,6 +181,8 @@ class Simulation:
         s.invuln = cfg.spawn_invuln
         s.alive = True
         s.thrusting = False
+        s.heat = 0.0
+        s.overheated = False
         s.target = None
         s.wander = self.rand(-1, 1)
         s.aggro = self.rand(0.6, 1.0)
@@ -183,6 +208,8 @@ class Simulation:
         ev.hits_taken[s.id] += 1
         if attacker is not None and attacker.team != s.team:
             ev.hits_dealt[attacker.id] += 1
+        elif attacker is not None and attacker is not s:
+            ev.team_hits[attacker.id] += 1  # friendly fire
         if s.hp <= 0:
             self._kill(s, attacker, ev)
         elif self.sfx is not None:
@@ -226,10 +253,18 @@ class Simulation:
             if not s.alive:
                 s.respawn -= dt
                 if s.respawn <= 0:
+                    if cfg.team_lives:
+                        if self.lives[s.team] <= 0:
+                            continue  # out of lives: stays dead
+                        self.lives[s.team] -= 1
                     self._spawn_ship(s)
                 continue
             s.cool -= dt
             s.invuln -= dt
+            if cfg.heat:
+                s.heat = max(0.0, s.heat - cfg.heat_cooling * dt)
+                if s.overheated and s.heat <= cfg.heat_resume:
+                    s.overheated = False
             turn, thrust, fire = actions.get(s.id, (0.0, False, False))
             turn = max(-1.0, min(1.0, float(turn)))
             s.a = wrap_angle(s.a + turn * cfg.turn_rate * dt)
@@ -247,8 +282,12 @@ class Simulation:
             s.x += s.vx * dt
             s.y += s.vy * dt
             self._wrap(s)
-            if fire and s.cool <= 0:
+            if fire and s.cool <= 0 and not s.overheated:
                 s.cool = cfg.fire_cooldown
+                if cfg.heat:
+                    s.heat += cfg.heat_per_shot
+                    if s.heat >= 1.0:
+                        s.overheated = True
                 cx, cy = math.cos(s.a), math.sin(s.a)
                 self.bullets.append(Bullet(
                     s.x + cx * cfg.ship_r, s.y + cy * cfg.ship_r,
@@ -262,8 +301,50 @@ class Simulation:
         self._ship_collisions(ev)
         self._bullets(ev)
         self._asteroids(ev)
+        if cfg.zone:
+            self._score_zone(ev)
         self.time += dt
         return ev
+
+    # ---- competitive rules -----------------------------------------------
+    def zone_counts(self) -> list[int]:
+        """Living ships of each team inside the control zone."""
+        cfg = self.cfg
+        cx, cy, r2 = cfg.width / 2, cfg.height / 2, cfg.zone_radius ** 2
+        inside = [0, 0]
+        for s in self.ships:
+            if s.alive and self.wdx(cx, s.x) ** 2 + self.wdy(cy, s.y) ** 2 < r2:
+                inside[s.team] += 1
+        return inside
+
+    def _score_zone(self, ev: Events) -> None:
+        inside = self.zone_counts()
+        if inside[0] != inside[1]:
+            t = 0 if inside[0] > inside[1] else 1
+            gain = self.cfg.zone_rate * self.cfg.dt
+            self.points[t] += gain
+            ev.zone_points[t] += gain
+
+    def eliminated(self, team: int) -> bool:
+        """With limited lives: no ships alive and no respawns left."""
+        return (self.cfg.team_lives > 0 and self.lives[team] <= 0
+                and not any(s.alive for s in self.ships if s.team == team))
+
+    @property
+    def over(self) -> bool:
+        return self.time >= self.cfg.battle_seconds - 1e-9 or self.eliminated(0) or self.eliminated(1)
+
+    def team_score(self, team: int) -> float:
+        """Kills plus control-zone points."""
+        return self.score[team] + self.points[team]
+
+    def winner(self) -> int:
+        """0 or 1, or -1 for a draw. Wiping out the other team wins outright."""
+        e0, e1 = self.eliminated(0), self.eliminated(1)
+        if e0 != e1:
+            return 1 if e0 else 0
+        a, b = self.team_score(0), self.team_score(1)
+        return -1 if abs(a - b) < 1e-9 else (0 if a > b else 1)
 
     def _ship_collisions(self, ev: Events) -> None:
         r2 = self.cfg.ship_r * 1.6
@@ -294,6 +375,7 @@ class Simulation:
         dt = self.cfg.dt
         r2 = self.cfg.ship_r ** 2
         w, h, hw, hh = self._w, self._h, self._hw, self._hh
+        ff = self.cfg.friendly_fire
         keep = []
         for bl in self.bullets:
             bl.x += bl.vx * dt
@@ -303,7 +385,7 @@ class Simulation:
             dead = bl.life <= 0
             if not dead:
                 for s in self.ships:
-                    if not s.alive or s.team == bl.team:
+                    if not s.alive or s is bl.owner or (s.team == bl.team and not ff):
                         continue
                     dx = (s.x - bl.x + hw) % w - hw  # inlined wdx / wdy (hot loop)
                     dy = (s.y - bl.y + hh) % h - hh

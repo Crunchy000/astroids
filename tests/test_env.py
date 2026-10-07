@@ -158,3 +158,37 @@ def test_fast_encoder_matches_reference():
             ref = np.stack([encode(sim, s, oc) for s in sim.ships])
             np.testing.assert_array_equal(encode_fast(sim, range(10), oc), ref)
             np.testing.assert_array_equal(encode_fast(sim, [7, 2], oc), ref[[7, 2]])
+
+
+def test_competitive_rules():
+    from astroids_gym.bot import scripted_action
+
+    sim = Simulation(Config.competitive(), seed=2)
+    shots = team_hits = 0
+    saw_overheat = saw_zone = False
+    while not sim.over:
+        ev = sim.step({s.id: scripted_action(sim, s) for s in sim.ships})
+        shots += sum(ev.shots)
+        team_hits += sum(ev.team_hits)
+        saw_overheat |= any(s.overheated for s in sim.ships)
+        saw_zone |= sum(ev.zone_points) > 0
+    assert saw_overheat and saw_zone and team_hits > 0
+    assert sim.eliminated(0) or sim.eliminated(1) or sim.time >= 60 - 1e-6
+    assert sim.winner() in (-1, 0, 1)
+
+
+def test_competitive_parallel_env_ends_and_pays_win_reward():
+    from astroids_gym import ObsConfig
+
+    env = AsteroidsBattleParallelEnv(config=Config.competitive(team_lives=1),
+                                     obs_config=ObsConfig(extended=True),
+                                     reward_config=RewardConfig(win=5.0, zone=0.1, friendly_hit=-0.3),
+                                     learning_teams=("blue",))
+    obs, _ = env.reset(seed=0)
+    assert next(iter(obs.values())).shape == (192,)
+    steps = 0
+    while env.agents:
+        obs, rew, term, trunc, info = env.step({a: env.action_space(a).sample() for a in env.agents})
+        steps += 1
+    assert all(term.values()) and steps < 1800  # random blue, 1 respawn: wiped out early
+    assert env.sim.winner() == 1 and all(r <= -5.0 + 1.0 for r in rew.values())

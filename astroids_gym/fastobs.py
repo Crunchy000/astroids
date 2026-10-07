@@ -45,15 +45,17 @@ def _clip(v):
 
 
 @njit(cache=True)
-def encode_kernel(ids, X, Y, VX, VY, A, HP, ALIVE, TEAM, COOL, INV,
-                  BX, BY, BVX, BVY, BT, AX, AY, AVX, AVY, AR,
+def encode_kernel(ids, X, Y, VX, VY, A, HP, ALIVE, TEAM, COOL, INV, HEAT, OVH,
+                  BX, BY, BVX, BVY, BT, BO, AX, AY, AVX, AVY, AR,
                   w, h, max_speed, ship_hp, fire_cooldown, bullet_speed,
-                  n_en, n_al, n_bl, n_as, out):
+                  n_en, n_al, n_bl, n_as, out,
+                  extended, base_size, team_size, zone_on, zone_r, ts0, ts1, lives0, lives1,
+                  time_left, ff_on, n_tb):
     n, nb, na = X.shape[0], BX.shape[0], AX.shape[0]
     big = max(n, nb, na, 1)
     dxs, dys, d2 = np.empty(big), np.empty(big), np.empty(big)
     valid = np.empty(big, dtype=np.bool_)
-    idx = np.empty(max(n_en, n_al, n_bl, n_as, 1), dtype=np.int64)
+    idx = np.empty(max(n_en, n_al, n_bl, n_as, n_tb, 1), dtype=np.int64)
     pos_scale = 1.0 / (w / 2)
     ship_v_scale = 1.0 / (2 * max_speed)
     bullet_v_scale = 1.0 / (bullet_speed + 2 * max_speed)
@@ -153,6 +155,56 @@ def encode_kernel(ids, X, Y, VX, VY, A, HP, ALIVE, TEAM, COOL, INV,
             row[b + 4] = (-rvxw * sa + rvyw * ca) * ship_v_scale
             row[b + 5] = AR[j] / 48.0
 
+        if extended:  # competitive-rules block, exactly as obs.encode
+            col = base_size
+            me = TEAM[i]
+            alive_me, alive_them, in_me, in_them = 0, 0, 0, 0
+            cx, cy, r2 = w / 2, h / 2, zone_r ** 2
+            for j in range(n):
+                if ALIVE[j]:
+                    if TEAM[j] == me:
+                        alive_me += 1
+                    else:
+                        alive_them += 1
+                    if zone_on and _wrap(X[j] - cx, w) ** 2 + _wrap(Y[j] - cy, h) ** 2 < r2:
+                        if TEAM[j] == me:
+                            in_me += 1
+                        else:
+                            in_them += 1
+            row[col] = HEAT[i] if alive else 0.0
+            row[col + 1] = 1.0 if (alive and OVH[i]) else 0.0
+            if zone_on:
+                zxw, zyw = _wrap(cx - X[i], w), _wrap(cy - Y[i], h)
+                zx, zy = zxw * ca + zyw * sa, -zxw * sa + zyw * ca
+                row[col + 2] = zx * pos_scale
+                row[col + 3] = zy * pos_scale
+                row[col + 4] = 1.0 if (alive and math.hypot(zx, zy) < zone_r) else 0.0
+                row[col + 5] = (in_me - in_them) / team_size
+                row[col + 6] = ((ts0 - ts1) if me == 0 else (ts1 - ts0)) / 30.0
+            row[col + 7] = lives0 if me == 0 else lives1
+            row[col + 8] = lives1 if me == 0 else lives0
+            row[col + 9] = alive_me / team_size
+            row[col + 10] = alive_them / team_size
+            row[col + 11] = time_left
+            col += 12
+            if ff_on:
+                for j in range(nb):
+                    dxs[j] = _wrap(BX[j] - X[i], w)
+                    dys[j] = _wrap(BY[j] - Y[i], h)
+                    d2[j] = dxs[j] * dxs[j] + dys[j] * dys[j]
+                    valid[j] = BT[j] == me and BO[j] != i
+                cnt = _topk(d2, valid, nb, n_tb, idx)
+                for q in range(cnt):
+                    j = idx[q]
+                    dx, dy = dxs[j], dys[j]
+                    rvxw, rvyw = BVX[j] - VX[i], BVY[j] - VY[i]
+                    b = col + q * 5
+                    row[b] = 1.0
+                    row[b + 1] = (dx * ca + dy * sa) * pos_scale
+                    row[b + 2] = (-dx * sa + dy * ca) * pos_scale
+                    row[b + 3] = (rvxw * ca + rvyw * sa) * bullet_v_scale
+                    row[b + 4] = (-rvxw * sa + rvyw * ca) * bullet_v_scale
+
         for c in range(out.shape[1]):
             out[r, c] = _clip(row[c])
 
@@ -169,13 +221,19 @@ def encode_fast(sim, ids, oc) -> np.ndarray:
         np.array([s.a for s in ships]), np.array([float(s.hp) for s in ships]),
         np.array([s.alive for s in ships], dtype=np.bool_), np.array([s.team for s in ships], dtype=np.int64),
         np.array([s.cool for s in ships]), np.array([s.invuln for s in ships]),
+        np.array([s.heat for s in ships]), np.array([s.overheated for s in ships], dtype=np.bool_),
         np.array([b.x for b in bl], dtype=np.float64), np.array([b.y for b in bl], dtype=np.float64),
         np.array([b.vx for b in bl], dtype=np.float64), np.array([b.vy for b in bl], dtype=np.float64),
-        np.array([b.team for b in bl], dtype=np.int64),
+        np.array([b.team for b in bl], dtype=np.int64), np.array([b.owner.id for b in bl], dtype=np.int64),
         np.array([a.x for a in ast], dtype=np.float64), np.array([a.y for a in ast], dtype=np.float64),
         np.array([a.vx for a in ast], dtype=np.float64), np.array([a.vy for a in ast], dtype=np.float64),
         np.array([a.r for a in ast], dtype=np.float64),
         float(cfg.width), float(cfg.height), float(cfg.max_speed), float(cfg.ship_hp),
         float(cfg.fire_cooldown), float(cfg.bullet_speed),
-        oc.n_enemies, oc.n_allies, oc.n_bullets, oc.n_asteroids, out)
+        oc.n_enemies, oc.n_allies, oc.n_bullets, oc.n_asteroids, out,
+        oc.extended, oc.base_size, cfg.team_size, cfg.zone, float(cfg.zone_radius),
+        float(sim.team_score(0)), float(sim.team_score(1)),
+        (sim.lives[0] / cfg.team_lives if cfg.team_lives else 1.0),
+        (sim.lives[1] / cfg.team_lives if cfg.team_lives else 1.0),
+        max(0.0, 1.0 - sim.time / cfg.battle_seconds), cfg.friendly_fire, oc.n_team_bullets)
     return out

@@ -12,6 +12,17 @@ Layout (default sizes):
 * allies 4 x 8:    same as enemies, without the lead direction
 * bullets 8 x 5:   present, dx', dy', dvx', dvy'   (nearest enemy bullets)
 * asteroids 5 x 6: present, dx', dy', dvx', dvy', radius
+
+With ``ObsConfig(extended=True)`` (for the competitive rules) 32 more follow:
+
+* rules (12):      heat, overheated, zone dx', zone dy', inside zone, zone control
+                   (own - enemy ships inside) / 5, score lead (kills + zone points) / 30,
+                   own respawns left, enemy respawns left, own ships alive / 5,
+                   enemy ships alive / 5, time remaining
+* team bullets 4 x 5: nearest teammates' bullets (only with friendly fire), as above
+
+The extra inputs come last, so a classic 160-input model can be warm-started by
+giving the new inputs zero weights.
 """
 
 from __future__ import annotations
@@ -30,6 +41,7 @@ SHIP_DIM = 8
 ENEMY_DIM = SHIP_DIM + 2
 BULLET_DIM = 5
 ASTEROID_DIM = 6
+RULES_DIM = 12
 
 
 @dataclass(frozen=True)
@@ -38,11 +50,18 @@ class ObsConfig:
     n_allies: int = 4
     n_bullets: int = 8
     n_asteroids: int = 5
+    extended: bool = False  # add the competitive-rules block (see module docstring)
+    n_team_bullets: int = 4
+
+    @property
+    def base_size(self) -> int:
+        return (SELF_DIM + self.n_enemies * ENEMY_DIM + self.n_allies * SHIP_DIM
+                + self.n_bullets * BULLET_DIM + self.n_asteroids * ASTEROID_DIM)
 
     @property
     def size(self) -> int:
-        return (SELF_DIM + self.n_enemies * ENEMY_DIM + self.n_allies * SHIP_DIM
-                + self.n_bullets * BULLET_DIM + self.n_asteroids * ASTEROID_DIM)
+        extra = RULES_DIM + self.n_team_bullets * BULLET_DIM if self.extended else 0
+        return self.base_size + extra
 
 
 def observation_space(oc: ObsConfig) -> spaces.Box:
@@ -108,6 +127,34 @@ def encode(sim: Simulation, s: Ship, oc: ObsConfig) -> np.ndarray:
             1.0, px * pos_scale, py * pos_scale, rvx * ship_v_scale, rvy * ship_v_scale,
             a.r / 48.0,
         )
+
+    if oc.extended:
+        i = oc.base_size
+        me, them = s.team, 1 - s.team
+        alive_n = [sum(1 for o in sim.ships if o.alive and o.team == t) for t in (0, 1)]
+        lives = [(sim.lives[t] / cfg.team_lives if cfg.team_lives else 1.0) for t in (0, 1)]
+        zone = [0.0] * 5
+        if cfg.zone:
+            zx, zy = rot(sim.wdx(s.x, cfg.width / 2), sim.wdy(s.y, cfg.height / 2))
+            inside = sim.zone_counts()
+            zone = [zx * pos_scale, zy * pos_scale,
+                    float(s.alive and math.hypot(zx, zy) < cfg.zone_radius),
+                    (inside[me] - inside[them]) / cfg.team_size,
+                    (sim.team_score(me) - sim.team_score(them)) / 30.0]
+        out[i:i + RULES_DIM] = (
+            s.heat if s.alive else 0.0, float(s.alive and s.overheated), *zone,
+            lives[me], lives[them], alive_n[me] / cfg.team_size, alive_n[them] / cfg.team_size,
+            max(0.0, 1.0 - sim.time / cfg.battle_seconds),
+        )
+        i += RULES_DIM
+        if cfg.friendly_fire:
+            mates = [b for b in sim.bullets if b.team == s.team and b.owner is not s]
+            for j, (_, dx, dy, b) in enumerate(nearest(mates, oc.n_team_bullets)):
+                px, py = rot(dx, dy)
+                rvx, rvy = rot(b.vx - s.vx, b.vy - s.vy)
+                out[i + j * BULLET_DIM:i + (j + 1) * BULLET_DIM] = (
+                    1.0, px * pos_scale, py * pos_scale, rvx * bullet_v_scale, rvy * bullet_v_scale,
+                )
 
     np.clip(out, -1.0, 1.0, out=out)
     return out
