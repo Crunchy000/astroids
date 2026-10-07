@@ -39,18 +39,28 @@ def plot_league(json_path, out_dir=None):
     out_dir = out_dir or os.path.dirname(json_path)
     members = data["members"]
     rules = data.get("rules", "classic")
+    # Ratings are relative; show every round on the same scale, built-in bots = 1000.
+    for r in rounds:
+        shift = 1000 - r["elo"]["bots"]
+        r["elo"] = {p: round(e + shift) for p, e in r["elo"].items()}
 
     # ---- Elo over rounds ----
     fig, ax = plt.subplots(figsize=(8, 4.6), facecolor=SURFACE)
     _style(ax)
     xs = [0] + [r["round"] for r in rounds]
     ax.axhline(1000, color=REFERENCE, lw=1.5, ls=(0, (5, 4)), zorder=2)
-    ax.annotate("starting champion 1000", (0, 1000), xytext=(4, 5), textcoords="offset points",
+    ax.annotate("built-in bots 1000", (0, 1000), xytext=(4, 5), textcoords="offset points",
                 xycoords=("axes fraction", "data"), color=TEXT_2, fontsize=9)
-    lo, hi = 1000, 1000
+    # The starting champion never changes; its measured rating each round, and its
+    # average as every member's round-0 rating.
+    champ = [r["elo"]["champion"] for r in rounds]
+    start = round(sum(champ) / len(champ))
+    ax.plot(xs[1:], champ, color=REFERENCE, lw=1.2, ls=":", marker="o", ms=4, zorder=2,
+            label="starting champion")
+    lo, hi = min(1000, *champ), max(1000, *champ)
     ends = []
     for m, color in zip(members, SERIES):
-        ys = [1000] + [r["elo"][m] for r in rounds]  # every member starts as the champion
+        ys = [start] + [r["elo"][m] for r in rounds]  # every member starts as the champion
         lo, hi = min(lo, *ys), max(hi, *ys)
         ax.plot(xs, ys, color=color, lw=2, marker="o", ms=6, mec=SURFACE, mew=2, zorder=3, label=m)
         ends.append([ys[-1], ys[-1], m])
@@ -71,9 +81,9 @@ def plot_league(json_path, out_dir=None):
     ax.grid(axis="y", color=GRID, lw=0.8)
     ax.set_xlabel("League round", color=TEXT_2, fontsize=10)
     ax.set_title("Elo rating per team model", loc="left", color=TEXT, fontsize=12, fontweight="bold", pad=8)
-    ax.legend(loc="lower right", bbox_to_anchor=(1.0, 1.0), ncol=len(members), frameon=False,
+    ax.legend(loc="lower right", bbox_to_anchor=(1.0, 1.0), ncol=len(members) + 1, frameon=False,
               fontsize=9, labelcolor=TEXT, borderaxespad=0.3)
-    fig.suptitle(f"League ({rules} rules): tournament after each round, starting champion = 1000",
+    fig.suptitle(f"League ({rules} rules): tournament after each round, built-in bots = 1000",
                  x=0.02, ha="left", color=TEXT_2, fontsize=10)
     fig.tight_layout()
     elo_png = os.path.join(out_dir, "elo.png")

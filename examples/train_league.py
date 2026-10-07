@@ -9,7 +9,7 @@ against a mix of: the other members' latest versions (50%), past snapshots of
 the whole league (30%) and the built-in bots (20%), playing a random side each
 battle. After every round, all members, the starting champion and the bots
 play a side-swapped round-robin tournament; ratings are Bradley-Terry Elo,
-anchored so the starting champion is 1000. Everything goes to ``--out``:
+anchored so the built-in bots are 1000. Everything goes to ``--out``:
 snapshots (``.zip`` + ``.npz``), ``league.json`` and charts.
 
 ``--rules competitive`` (the default) plays with the control zone, weapon heat,
@@ -266,7 +266,7 @@ def main():
         t = time.time()
         results = tournament(players, args.tournament_battles, seed=10_000 * rnd, workers=args.n_workers,
                              rules=args.rules)
-        elo = fit_elo(results, anchor=champion)
+        elo = fit_elo(results, anchor="bots")
         disp = {latest[n]: n for n in names} | {champion: "champion", "bots": "bots"}
         round_log["elo"] = {disp[p]: round(e) for p, e in elo.items()}
         round_log["matrix"] = {f"{disp[a]}|{disp[b]}": [round(w, 3), round(m, 2)]
