@@ -231,6 +231,23 @@ v2's best beat the bots and the rusher style more often than m16, but only broke
 
 On a GPU, `train_population.py --device auto` trains there, and `--inference main` (the default with a GPU) runs every network in the main process. That covers the frozen opponents and tournament players, batched across all battles (`policies.PolicyBank`, `league.play_matches`), so the CPU worker processes only simulate battles. This matters because Colab gives 2 CPU cores, and an attention opponent costs ~8 ms per batch in NumPy. Tournament results are identical either way (tested). `gauntlet.py --device cuda` does the same for evaluation.
 
+### First Colab run: an attention population
+
+```bash
+python examples/train_population.py --size 6 --exploiters 1 --rounds 12 --samples-per-round 400000 \
+    --battles-per-worker 24 --tournament-battles 10 --device auto \
+    --founders results/attention_best.zip:evolved,results/attention_best.zip:pack,results/attention_best.zip:guardian
+```
+
+Six attention-model teams, all starting from the attention model with three reward personalities, plus one exploiter, trained for 12 rounds (400k samples per member per round) on a Colab L4 GPU with 12 CPU cores. Training ran at about 9,000 to 11,000 samples/s, so each round took about 350 s and the whole run took 70 minutes, using 2.3 Colab compute units. The evolved line took over: the best member, m08 (an evolved member whose network grew to 384 units), led the last three rounds' tournaments at about 1,550 Elo, against 1,330 to 1,430 for the unchanged starting model. The exploiter never beat the leader (45 to 52%).
+
+| Team (40 fresh battles per opponent) | Gauntlet score | vs m16 | vs league striker | vs bots |
+|---|---|---|---|---|
+| **Colab population best (m08)** | **95%** | **85%** | **98%** | **98%** |
+| Attention model (start) | 91% | 70% | 90% | 95% |
+
+Head to head on 100 fresh battles, m08 beat the attention model it started from 66% of the time, though by a small average margin (+1.7 points per battle). Model `results/colab_population_best.zip`; charts `results/gauntlet.png`, `results/colab_population_{elo,lineage}.png`; video: [m08 vs the attention model](results/colab_best_vs_attention.mp4) (one of the battles m08 loses, 25.8 to 26.1).
+
 ### Where the training time goes
 
 On this 4-core CPU with the centralised critic, one PPO iteration splits about 49% PPO update, 29% battle simulation and 22% network inference. The collision checks and the scripted bot were sped up without changing any result: 12 full battles of trajectories and 288k bot actions are bit-identical, and the physics step is about 1.4x faster. That only saves about 5% end to end. The network maths is now the bottleneck, so a GPU (or fewer PPO epochs) is where a big speed-up would come from.

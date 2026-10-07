@@ -1,6 +1,79 @@
 {
   "sections": [
     {
+      "id": "colab",
+      "title": "First GPU run: an attention population on Colab",
+      "summary": "Six attention-model teams, all copies of the attention model with three reward personalities, plus one exploiter, trained for 12 rounds on a Colab L4 GPU (about 70 minutes, 400k samples per member per round). The 'evolved' line took over, and its best member, m08, whose network grew to 384 units, led the last three rounds. On the gauntlet it scored 95%, against 91% for the attention model it started from, with the biggest gains against m16 (85% vs 70%) and the league striker (98% vs 90%). Head to head over 100 fresh battles it beat the attention model 66% of the time, though by a small average margin (+1.7 points per battle).",
+      "table": {
+        "columns": [
+          "Opponent (40 fresh battles each)",
+          "Colab population best (m08)",
+          "Attention model (start)"
+        ],
+        "rows": [
+          [
+            "Gauntlet score (mean)",
+            "95%",
+            "91%"
+          ],
+          [
+            "vs m16",
+            "85%",
+            "70%"
+          ],
+          [
+            "vs built-in bots",
+            "98%",
+            "95%"
+          ],
+          [
+            "vs rusher bots",
+            "92%",
+            "95%"
+          ],
+          [
+            "vs zone bots",
+            "98%",
+            "98%"
+          ],
+          [
+            "vs sniper bots",
+            "100%",
+            "100%"
+          ],
+          [
+            "vs league striker",
+            "98%",
+            "90%"
+          ],
+          [
+            "Head to head (100 battles)",
+            "66%",
+            "34%"
+          ]
+        ],
+        "highlight": 0
+      },
+      "charts": [
+        {
+          "src": "results/colab_population_elo.png",
+          "alt": "Elo of each population member by round over 12 rounds. The evolved members end on top; m08 leads the last three rounds at about 1,550, while the unchanged starting model sits between 1,260 and 1,440."
+        },
+        {
+          "src": "results/gauntlet.png",
+          "alt": "Gauntlet win rates with 95% intervals for five teams. Colab population best (m08): 98% vs bots, 92% vs rusher, 100% vs sniper, 98% vs zone, 98% vs league striker, 85% vs m16. Attention model: 95, 95, 100, 98, 90 and 70%. Population v2 best: 92, 90, 100, 88, 98 and 50%. MLP twin: 82, 90, 100, 92, 98 and 57%. m16: 82, 75, 100, 82 and 90%."
+        }
+      ],
+      "videos": [
+        {
+          "src": "results/colab_best_vs_attention.mp4",
+          "title": "Colab population best (m08) vs the attention model",
+          "note": "Seed 7. One of the third of battles m08 loses: red (attention) wins by wipe-out at 41 s, 26.1 to 25.8.",
+          "poster": "results/colab_best_vs_attention.jpg"
+        }
+      ]
+    },
+    {
       "id": "attention",
       "title": "Smarter: attention over entities",
       "summary": "An attention network treats every ship, bullet and asteroid it can see as a separate item, and one transformer layer lets it weigh them against each other. The plain network (MLP) reads them as one long list of numbers. The attention model started as a copy of m16: it imitated m16's decisions over 200 battles, including two rounds where it flew and m16 marked what it should have done, and then won 40% against m16. Next, it and an MLP copy of m16 trained side by side for 8 rounds with identical settings. Both used a critic that sees the whole battle, opponents picked more often the more they win, and the three bot styles. On fresh battles the attention model beat its MLP twin 62% of the time (180 battles, rounds 6 to 8), and it scored 91% on the gauntlet, against 87% for the MLP and 86% for m16. Its biggest gains were against the rusher and zone bots, m16's weak spots. The cost: on 4 CPU cores it trains about 4 times slower (1,200 vs 4,800 samples per second).",
@@ -68,7 +141,7 @@
       "charts": [
         {
           "src": "results/gauntlet.png",
-          "alt": "Gauntlet win rates with 95% intervals for four teams. Attention model: 95% vs bots, 95% vs rusher, 100% vs sniper, 98% vs zone, 90% vs league striker, 70% vs m16. Population v2 best: 92, 90, 100, 88, 98 and 50%. MLP twin: 82, 90, 100, 92, 98 and 57%. m16: 82, 75, 100, 82 and 90%."
+          "alt": "Gauntlet win rates with 95% intervals for five teams. Colab population best (m08): 98% vs bots, 92% vs rusher, 100% vs sniper, 98% vs zone, 98% vs league striker, 85% vs m16. Attention model: 95, 95, 100, 98, 90 and 70%. Population v2 best: 92, 90, 100, 88, 98 and 50%. MLP twin: 82, 90, 100, 92, 98 and 57%. m16: 82, 75, 100, 82 and 90%."
         }
       ],
       "videos": [
