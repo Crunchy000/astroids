@@ -128,6 +128,7 @@ def main():
     p.add_argument("--p-grow", type=float, default=0.3, help="chance a mutated copy widens its network")
     p.add_argument("--max-width", type=int, default=512)
     p.add_argument("--bots-share", type=float, default=0.3)
+    p.add_argument("--lr", type=float, default=1e-4, help="founders' learning rate (mutations scale it from there)")
     p.add_argument("--critic", choices=["central", "local"], default="central")
     p.add_argument("--sampling", choices=["pfsp", "uniform"], default="pfsp")
     p.add_argument("--exploiters", type=int, default=2)
@@ -138,7 +139,7 @@ def main():
     p.add_argument("--battles-per-worker", type=int, default=8)
     p.add_argument("--n-steps", type=int, default=64)
     p.add_argument("--tournament-battles", type=int, default=12, help="battles per pair per round")
-    p.add_argument("--rules", choices=["competitive", "classic"], default="competitive")
+    p.add_argument("--rules", choices=["competitive", "classic", "dogfight"], default="competitive")
     p.add_argument("--out", default="population")
     p.add_argument("--resume", action="store_true")
     p.add_argument("--seed", type=int, default=0)
@@ -215,7 +216,7 @@ def main():
         for i in range(args.size):
             path, personality = founders[i % len(founders)]
             founder_model = PPO.load(path, device="cpu")
-            genome = {"reward": dict(PERSONALITIES[personality]), "lr": 1e-4, "ent_coef": 0.003,
+            genome = {"reward": dict(PERSONALITIES[personality]), "lr": args.lr, "ent_coef": 0.003,
                       "widths": net_widths(founder_model)}
             changes = []
             if i >= len(founders):  # founders themselves stay unmutated

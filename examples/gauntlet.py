@@ -82,6 +82,7 @@ def main():
     p.add_argument("--names", help="comma-separated display names for the teams (for --json)")
     p.add_argument("--json", help="also write the results here (for plot_gauntlet.py)")
     p.add_argument("--workers", type=int, default=os.cpu_count())
+    p.add_argument("--rules", choices=["competitive", "classic", "dogfight"], default="competitive")
     p.add_argument("--device", help="run the networks batched in this process on this torch device "
                                     "(e.g. cuda); default: NumPy in worker processes")
     args = p.parse_args()
@@ -98,7 +99,7 @@ def main():
             | {s: s for s in FORMATION_STYLES}
         for team, display in zip(args.teams, names):
             spec = as_spec(team, tmp)
-            res = gauntlet(spec, opponents, args.battles, args.seed, args.workers, bank=bank)
+            res = gauntlet(spec, opponents, args.battles, args.seed, args.workers, args.rules, bank=bank)
             score = np.mean([w for w, _ in res.values()])
             print(f"\n{team}: gauntlet score {score:.0%} ({args.battles} battles per opponent)")
             for name, (w, m) in res.items():

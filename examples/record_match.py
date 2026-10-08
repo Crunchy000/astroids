@@ -39,7 +39,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--blue", required=True)
     p.add_argument("--red", default="bots")
-    p.add_argument("--rules", choices=["competitive", "classic"], default="competitive")
+    p.add_argument("--rules", choices=["competitive", "classic", "dogfight"], default="competitive")
     p.add_argument("--seed", type=int, default=7)
     p.add_argument("--hold", type=float, default=3.0, help="seconds to hold the result at the end")
     p.add_argument("--caption", help="text at the bottom (default: who flies each side)")

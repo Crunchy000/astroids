@@ -264,7 +264,7 @@ def opponent_mix(name, latest, snapshots, rng, bots_share=0.2, max_snapshots=6):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--init", required=True, help="starting champion .zip (every member starts here)")
-    p.add_argument("--rules", choices=["competitive", "classic"], default="competitive")
+    p.add_argument("--rules", choices=["competitive", "classic", "dogfight"], default="competitive")
     p.add_argument("--members", default="striker,guardian,pack")
     p.add_argument("--rounds", type=int, default=10)
     p.add_argument("--samples-per-round", type=int, default=1_000_000, help="ship-steps per member per round")

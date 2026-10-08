@@ -56,6 +56,18 @@ class Config:
     # at least 0.3 W from the enemy spawn in either direction, facing the centre; a
     # respawning ship takes the safest of 8 candidate points (farthest from enemies).
     spawns: str = "edges"
+    # ---- dogfight rules (off by default): ships fly like aircraft ----
+    # The velocity swings round to follow the nose at up to ``lift`` rad/s, so a ship
+    # can't slide sideways or spin round to shoot backwards. The turn rate peaks at
+    # ``corner_speed``: below it a slow ship turns sluggishly (down to ``turn_slow`` of
+    # ``turn_rate`` at a standstill), above it a fast one turns wide (``turn_fast`` at
+    # ``max_speed``). Turning bleeds speed: ``bleed`` per second at full turn.
+    flight: bool = False
+    lift: float = 2.5
+    corner_speed: float = 150.0
+    turn_slow: float = 0.4
+    turn_fast: float = 0.55
+    bleed: float = 0.3
 
     @classmethod
     def competitive(cls, **overrides) -> "Config":
@@ -63,6 +75,21 @@ class Config:
         rules = dict(zone=True, heat=True, team_lives=20, respawn_time=4.0, friendly_fire=True,
                      spawns="halves", spawn_invuln=2.0, bullet_life=0.8, zone_reinforce_every=3.0)
         return cls(**{**rules, **overrides})
+
+    @classmethod
+    def dogfight(cls, **overrides) -> "Config":
+        """The competitive rules plus flight physics, a slower top turn rate and fewer asteroids."""
+        return cls.competitive(**{"flight": True, "turn_rate": 3.0, "asteroid_count": 4, "min_asteroids": 2,
+                                  **overrides})
+
+    def turn_factor(self, speed: float) -> float:
+        """Fraction of ``turn_rate`` available at this speed (always 1 without ``flight``)."""
+        if not self.flight:
+            return 1.0
+        if speed <= self.corner_speed:
+            return self.turn_slow + (1.0 - self.turn_slow) * speed / self.corner_speed
+        over = (speed - self.corner_speed) / max(self.max_speed - self.corner_speed, 1e-6)
+        return 1.0 - (1.0 - self.turn_fast) * min(over, 1.0)
 
 
 def wrap_angle(a: float) -> float:
@@ -292,7 +319,17 @@ class Simulation:
                     s.overheated = False
             turn, thrust, fire = actions.get(s.id, (0.0, False, False))
             turn = max(-1.0, min(1.0, float(turn)))
-            s.a = wrap_angle(s.a + turn * cfg.turn_rate * dt)
+            if cfg.flight:
+                sp = math.hypot(s.vx, s.vy)
+                s.a = wrap_angle(s.a + turn * cfg.turn_rate * cfg.turn_factor(sp) * dt)
+                if sp > 1e-6:
+                    va = math.atan2(s.vy, s.vx)
+                    d = wrap_angle(s.a - va)
+                    va += max(-cfg.lift * dt, min(cfg.lift * dt, d))
+                    sp *= math.exp(-cfg.bleed * abs(turn) * dt)
+                    s.vx, s.vy = sp * math.cos(va), sp * math.sin(va)
+            else:
+                s.a = wrap_angle(s.a + turn * cfg.turn_rate * dt)
             s.thrusting = bool(thrust)
             if s.thrusting:
                 s.vx += math.cos(s.a) * cfg.thrust * dt

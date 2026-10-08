@@ -386,3 +386,33 @@ def test_crashes_are_counted_and_rewarded():
     ev = sim.step({})
     assert ev.deaths[0] == 1 and ev.crashes[0] == 1
     assert RewardConfig(death=-1.0, crash=-1.5).individual(ev, 0) == -2.5
+
+
+def test_dogfight_ships_fly_like_aircraft():
+    import math
+    cfg = Config.dogfight()
+    assert cfg.asteroid_count < Config.competitive().asteroid_count
+    # The turn rate peaks at corner speed and is slower when stopped or flat out.
+    assert cfg.turn_factor(cfg.corner_speed) == 1.0
+    assert cfg.turn_factor(0.0) < 1.0 and cfg.turn_factor(cfg.max_speed) < 1.0
+    assert Config.competitive().turn_factor(0.0) == 1.0
+    sim = Simulation(cfg, seed=1)
+    s = sim.ships[0]
+    s.vx, s.vy, s.a = 150.0, 0.0, 0.0
+    for _ in range(30):  # half a second of hard turn: the velocity follows the nose and speed bleeds
+        sim.step({s.id: (1.0, False, False)})
+    heading_of_travel = math.atan2(s.vy, s.vx)
+    assert abs(math.remainder(heading_of_travel - s.a, math.tau)) < 0.2
+    turned = Simulation(cfg, seed=1)
+    straight = turned.ships[0]
+    straight.vx, straight.vy, straight.a = 150.0, 0.0, 0.0
+    for _ in range(30):
+        turned.step({straight.id: (0.0, False, False)})
+    assert math.hypot(s.vx, s.vy) < math.hypot(straight.vx, straight.vy) - 5
+
+
+def test_bots_fight_under_dogfight_rules():
+    sim = Simulation(Config.dogfight(), seed=5)
+    for _ in range(900):
+        sim.step({x.id: scripted_action(sim, x, 1, "wedge" if x.team == 0 else None) for x in sim.ships})
+    assert sim.team_score(0) + sim.team_score(1) > 0

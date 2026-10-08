@@ -149,9 +149,11 @@ class Battle:
 
 # ---- training env -----------------------------------------------------------------
 def make_rules(rules: str) -> tuple[Config, ObsConfig]:
-    """``"classic"`` or ``"competitive"`` -> (game config, observation config)."""
+    """``"classic"``, ``"competitive"`` or ``"dogfight"`` -> (game config, observation config)."""
     if rules == "competitive":
         return Config.competitive(), ObsConfig(extended=True)
+    if rules == "dogfight":
+        return Config.dogfight(), ObsConfig(extended=True)
     return Config(), ObsConfig()
 
 
