@@ -113,11 +113,12 @@ class Events:
         self.shots = [0] * n
         self.team_hits = [0] * n  # friendly-fire hits this ship landed on teammates
         self.overheats = [0] * n  # times this ship's gun locked from heat
+        self.crashes = [0] * n  # deaths from flying into an asteroid or ramming an enemy
         self.zone_points = [0.0, 0.0]  # per team
 
     def merge(self, other: "Events") -> None:
         for name in ("hits_dealt", "hits_taken", "kills", "deaths", "shots", "team_hits", "overheats",
-                     "zone_points"):
+                     "crashes", "zone_points"):
             mine, theirs = getattr(self, name), getattr(other, name)
             for i, v in enumerate(theirs):
                 mine[i] += v
@@ -406,6 +407,9 @@ class Simulation:
                     if a.team != b.team and -rv > self.cfg.ram_speed:
                         self._hit(a, b, ev)
                         self._hit(b, a, ev)
+                        for x in (a, b):
+                            if not x.alive:
+                                ev.crashes[x.id] += 1
 
     def _bullets(self, ev: Events) -> None:
         dt = self.cfg.dt
@@ -466,6 +470,7 @@ class Simulation:
                 d = math.hypot(dx, dy)
                 if d < a.r + cfg.ship_r * 0.7:
                     if s.invuln <= 0:
+                        ev.crashes[s.id] += 1
                         self._kill(s, None, ev)
                         self._break_asteroid(k)
                     else:  # bounce off while invulnerable

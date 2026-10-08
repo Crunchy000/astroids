@@ -18,7 +18,7 @@ Two rule sets, the same in the browser (press **C** to switch, or `?rules=classi
   - **Friendly fire:** bullets hit teammates (never the shooter).
   - **Fair spawns:** each team spawns in the middle of its own half (at least 0.3 of the map width from the enemy spawn either way, instead of ~0.2 across the wrap seam), facing the zone; a respawning ship takes the safest of 8 candidate points, and spawn protection lasts 2 s. With bots, ships dying within 3 s of respawning fell from 40% to 28%, and zone points per battle rose from ~6 to ~22.
 
-The bots contest the zone when no enemy is near. For agents, `ObsConfig(extended=True)` adds 32 observation inputs for the rules (heat, zone position and control, score lead, respawns and ships left, time remaining, nearby teammates' bullets), and `RewardConfig` has `zone`, `friendly_hit` and `win` terms.
+The bots contest the zone when no enemy is near. For agents, `ObsConfig(extended=True)` adds 32 observation inputs for the rules (heat, zone position and control, score lead, respawns and ships left, time remaining, nearby teammates' bullets), and `RewardConfig` has `zone`, `friendly_hit`, `win` and `crash` (dying to an asteroid or a ram, on top of `death`) terms.
 
 ## Install
 
@@ -247,6 +247,19 @@ Six attention-model teams, all starting from the attention model with three rewa
 | Attention model (start) | 91% | 70% | 90% | 95% |
 
 Head to head on 100 fresh battles, m08 beat the attention model it started from 66% of the time, though by a small average margin (+1.7 points per battle). Model `results/colab_population_best.zip`; charts `results/gauntlet.png`, `results/colab_population_{elo,lineage}.png`; video: [m08 vs the attention model](results/colab_best_vs_attention.mp4) (one of the battles m08 loses, 25.8 to 26.1).
+
+### Careless flying: crashes and friendly fire
+
+Over 12 battles against the default bots, m08 lost nearly a third of its ships to its own mistakes:
+
+| Cause of death | m08 | Default bots |
+|---|---|---|
+| Asteroids | 52 (19%) | 28 (9%) |
+| Friendly fire | 30 (11%) | 8 (3%) |
+| Ramming an enemy | 5 (2%) | 11 (3%) |
+| Enemy bullets | 191 (69%) | 274 (85%) |
+
+The ships can see the nearest asteroids, enemies and teammates' bullets, but the reward barely cared: in m08's line, a death cost −0.5 against +2.3 for a kill, and a friendly-fire hit cost −0.3. The simulation now counts crashes (`Events.crashes`: deaths from an asteroid or a ram), and `RewardConfig.crash` penalises them on top of `death`. Every personality now has `crash: -1.5`, and friendly fire costs −0.6 (−0.8 for the guardian). Runs started from the founders pick these up; resumed runs keep the genomes they already have.
 
 ### Formations and tactics for the bots
 

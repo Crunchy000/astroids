@@ -373,3 +373,16 @@ def test_tactics_bots_fight():
             for s in sim.ships:
                 shots[s.team] += ev.shots[s.id]
         assert shots[0] > 50 and sim.team_score(0) > 0, style
+
+
+def test_crashes_are_counted_and_rewarded():
+    from astroids_gym.env import RewardConfig
+
+    sim = Simulation(Config(), seed=3)
+    s = sim.ships[0]
+    s.invuln = 0.0
+    a = sim.asteroids[0]
+    s.x, s.y, s.vx, s.vy = a.x, a.y, 0.0, 0.0  # inside an asteroid
+    ev = sim.step({})
+    assert ev.deaths[0] == 1 and ev.crashes[0] == 1
+    assert RewardConfig(death=-1.0, crash=-1.5).individual(ev, 0) == -2.5

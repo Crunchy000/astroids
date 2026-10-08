@@ -44,21 +44,24 @@ from league import _worker, export_policy, fit_elo, make_rules, tournament, win_
 # trigger discipline (inert under classic rules: no zone, friendly fire or heat).
 # The overheat penalty and small shot cost break the classic-rules habit of
 # spraying: in early competitive play the agents' guns were locked ~46% of the time.
-_BASE = {"hit_dealt": 0.2, "hit_taken": -0.2, "zone": 0.15, "win": 3.0, "friendly_hit": -0.3,
-         "overheat": -0.25, "shot": -0.01}
+_BASE = {"hit_dealt": 0.2, "hit_taken": -0.2, "zone": 0.15, "win": 3.0, "friendly_hit": -0.6,
+         "overheat": -0.25, "shot": -0.01, "crash": -1.5}
 PERSONALITIES = {
     # Values kills far above its own survival.
     "striker": {**_BASE, "kill": 1.5, "death": -0.5, "hit_dealt": 0.3, "hit_taken": -0.1,
                 "team_spirit": 0.3, "zone": 0.1},
     # Values staying alive above everything.
     "guardian": {**_BASE, "kill": 0.8, "death": -1.5, "hit_taken": -0.4, "team_spirit": 0.5,
-                 "friendly_hit": -0.5},
+                 "friendly_hit": -0.8},
     # Every ship gets its teammates' kills and deaths in full, and it plays the objective.
     "pack": {**_BASE, "kill": 1.0, "death": -1.0, "team_spirit": 1.0, "zone": 0.25},
     # The reward genome that evolved in the first population run (member m16, a
     # striker descendant): kills and the win matter more, being hit a bit less.
-    "evolved": {"hit_dealt": 0.192, "hit_taken": -0.1562, "zone": 0.125, "win": 3.75, "friendly_hit": -0.3,
-                "overheat": -0.2, "shot": -0.008, "kill": 2.3438, "death": -0.5, "team_spirit": 0.24},
+    # Crashes (asteroids, rams) and friendly fire were added later: they were a third
+    # of the evolved models' deaths.
+    "evolved": {"hit_dealt": 0.192, "hit_taken": -0.1562, "zone": 0.125, "win": 3.75, "friendly_hit": -0.6,
+                "overheat": -0.2, "shot": -0.008, "kill": 2.3438, "death": -0.5, "team_spirit": 0.24,
+                "crash": -1.5},
 }
 
 
