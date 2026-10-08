@@ -280,31 +280,33 @@ Fifteen new scripted bot styles (`astroids_gym/bot.py`), all chosen with `script
 * **Flat scissors**: throttle back and reverse the turn every 0.7 s, so a faster attacker overshoots.
 * **Skid** (flat-scissors drift): cut the engine and spin round to face the attacker, sliding on momentum while firing back.
 
-Win rates against the other bots (40 battles each, from both sides, competitive rules):
+Win rates against the other bots (40 battles each) and against m08, the best trained team (20 battles each), from both sides under the competitive rules:
 
-| Style | | vs default bots | vs rusher | vs sniper | vs zone |
-|---|---|---|---|---|---|
-| `bots:wedge` | Wedge | 98% | 92% | 100% | 90% |
-| `bots:line` | Line | 98% | 92% | 100% | 90% |
-| `bots:echelon` | Echelon | 95% | 92% | 98% | 92% |
-| `bots:fingerfour` | Finger four | 98% | 95% | 100% | 88% |
-| `bots:falsegap` | False gap | 80% | 90% | 100% | 65% |
-| `bots:pincer` | Pincer | 98% | 95% | 100% | 92% |
-| `bots:hammer` | Hammer and anvil | 88% | 92% | 100% | 82% |
-| `bots:circle` | Cantabrian circle | 95% | 95% | 95% | 92% |
-| `bots:lufbery` | Lufbery circle | 95% | 95% | 100% | 92% |
-| `bots:retreat` | Feigned retreat | 72% | 75% | 78% | 57% |
-| `bots:pair` | Fighting pair | 60% | 65% | 98% | 60% |
-| `bots:thach` | Thach weave | 55% | 42% | 98% | 55% |
-| `bots:break` | Break turn | 40% | 30% | 92% | 48% |
-| `bots:scissors` | Flat scissors | 32% | 32% | 95% | 42% |
-| `bots:skid` | Skid (flat-scissors drift) | 48% | 38% | 98% | 46% |
+| Style | | vs default bots | vs rusher | vs sniper | vs zone | vs m08 (20 battles) |
+|---|---|---|---|---|---|---|
+| `bots:wedge` | Wedge | 98% | 92% | 100% | 90% | 15% |
+| `bots:line` | Line | 98% | 92% | 100% | 90% | 40% |
+| `bots:echelon` | Echelon | 95% | 92% | 98% | 92% | 15% |
+| `bots:fingerfour` | Finger four | 98% | 95% | 100% | 88% | 50% |
+| `bots:falsegap` | False gap | 80% | 90% | 100% | 65% | 15% |
+| `bots:pincer` | Pincer | 98% | 95% | 100% | 92% | 40% |
+| `bots:hammer` | Hammer and anvil | 88% | 92% | 100% | 82% | 10% |
+| `bots:circle` | Cantabrian circle | 95% | 95% | 95% | 92% | 30% |
+| `bots:lufbery` | Lufbery circle | 95% | 95% | 100% | 92% | 10% |
+| `bots:retreat` | Feigned retreat | 72% | 75% | 78% | 57% | 10% |
+| `bots:pair` | Fighting pair | 60% | 65% | 98% | 60% | 5% |
+| `bots:thach` | Thach weave | 55% | 42% | 98% | 55% | 5% |
+| `bots:break` | Break turn | 40% | 30% | 92% | 48% | 5% |
+| `bots:scissors` | Flat scissors | 32% | 32% | 95% | 42% | 0% |
+| `bots:skid` | Skid (flat-scissors drift) | 48% | 38% | 98% | 46% | 10% |
 
 Flying together pays off. Every formation and team tactic beats the default bots (72 to 98%). The false gap and the feigned retreat win less often because they give up the control zone while they fall back. The pairs only break even, because their leaders fly like the default bot.
 
 The dogfight manoeuvres don't help at all (32 to 48% against the default bots). In this game a ship turns at 4.2 rad/s (a full circle in 1.5 s), and its nose isn't tied to its direction of travel, so it can spin round and shoot backwards while sliding. An attacker never stays on anyone's tail long enough for a break or a scissors to matter. For those manoeuvres to mean something, the game would need flight-like rules: turn rate depending on speed, and turning that bleeds energy.
 
-The arena is small, so the shapes mostly show on the approach and when a team regroups. Contact comes about 2 to 3 seconds after the start, and then it becomes a close fight. Twelve of the styles (every formation and tactic, plus the Thach weave and the skid) are gauntlet opponents, placed after the hall of fame so the other opponents keep their battle seeds. All fifteen are in `train_population.py`'s opponent pool. Videos of each against the default bots are on the [videos page](videos.html).
+Against m08 the order changes. The finger four wins half its battles, and the line and the pincer win 40%, a real test for a trained team. The rest win 5 to 30%, and m08 beats the default bots 95% of the time. With 20 battles each, these rates are about ±11%.
+
+The arena is small, so the shapes mostly show on the approach and when a team regroups. Contact comes about 2 to 3 seconds after the start, and then it becomes a close fight. Twelve of the styles (every formation and tactic, plus the Thach weave and the skid) are gauntlet opponents, placed after the hall of fame so the other opponents keep their battle seeds. All fifteen are in `train_population.py`'s opponent pool. Videos of each against m08 are on the [videos page](videos.html).
 
 ### Where the training time goes
 
