@@ -1,6 +1,79 @@
 {
   "sections": [
     {
+      "id": "colab_run3",
+      "title": "Colab run 3: crash penalties and formation opponents",
+      "summary": "Six attention-model teams plus one exploiter, trained for 16 rounds of full battles on a Colab L4 GPU (6.7 hours) with the new crash and friendly-fire penalties and every formation and tactic bot in the opponent pool. The best member, m16, scored 98% on the gauntlet with the formation bots, against 83% for m08, and beat m08 in 88 of 100 fresh battles. It wins 92 to 100% against every formation, including the line, finger four and pincer that gave m08 trouble. It crashes a little less than m08 (17% of deaths from asteroids, down from 19%; friendly fire 9%, down from 11%), but still about twice as often as the scripted bots.",
+      "table": {
+        "columns": [
+          "Opponent (40 fresh battles each)",
+          "Colab run 3 best (m16)",
+          "Colab m08 (before)"
+        ],
+        "rows": [
+          [
+            "Gauntlet score (mean)",
+            "98%",
+            "83%"
+          ],
+          [
+            "vs attention model",
+            "90%",
+            "72%"
+          ],
+          [
+            "vs population m16 (league era)",
+            "95%",
+            "85%"
+          ],
+          [
+            "vs line bots",
+            "100%",
+            "52%"
+          ],
+          [
+            "vs finger four bots",
+            "100%",
+            "62%"
+          ],
+          [
+            "vs pincer bots",
+            "92%",
+            "62%"
+          ],
+          [
+            "vs falsegap bots",
+            "98%",
+            "75%"
+          ],
+          [
+            "Head to head (100 battles)",
+            "88%",
+            "12%"
+          ]
+        ],
+        "highlight": 0
+      },
+      "charts": [
+        {
+          "src": "results/gauntlet_run3.png",
+          "alt": "Gauntlet win rates with 95% intervals for run 3's best (m16, score 98%) and m08 (83%). m16 wins 100% against the bots, the bot styles and the league striker, 95% vs population m16, 90% vs the attention model, 80% vs m08, and 92 to 100% against every formation bot. m08 wins 52 to 100% against the formation bots, lowest against the line (52%), the pincer and finger four (62%)."
+        },
+        {
+          "src": "results/colab_run3_elo.png",
+          "alt": "Elo of each population member over 16 rounds. The evolved members end on top at about 1,650 to 1,740; the unchanged starting model sits between 1,310 and 1,510."
+        }
+      ],
+      "videos": [
+        {
+          "src": "results/colab_run3_vs_m08.mp4",
+          "title": "Colab run 3 best (m16) vs m08",
+          "note": "Seed 7. Blue (m16) wins 36.4 to 28.1 at 41 s.",
+          "poster": "results/colab_run3_vs_m08.jpg"
+        }
+      ]
+    },
+    {
       "id": "formations",
       "title": "Formations and tactics for the bots",
       "summary": "Fifteen new scripted bot styles. Formations (wedge, line, echelon, finger four) and team tactics (false gap, pincer, hammer and anvil, Cantabrian circle, Lufbery circle, feigned retreat) give each ship a slot in a shape centred on its team, facing the control zone and then the enemy. Fighting pairs (a plain wingman pair and the Thach weave) split the team into leader-wingman pairs. Dogfight manoeuvres (break turn, flat scissors, skid) add a defensive move to the default bot whenever an enemy is on its tail. Every formation and team tactic beats the default bots (72 to 98%), and the pairs break even. The dogfight manoeuvres don't help (32 to 48%): ships turn a full circle in 1.5 s and can spin round to shoot while sliding, so nobody stays on a tail long enough for them to matter. Against m08, the best trained team, the finger four wins half its battles and the line and the pincer win 40%; the rest win 5 to 30%. The videos show each style against m08. The arena is small, so the shapes show mostly on the approach and when a team regroups.",

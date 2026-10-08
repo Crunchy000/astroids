@@ -321,6 +321,27 @@ Against m08 the order changes. The finger four wins half its battles, and the li
 
 The arena is small, so the shapes mostly show on the approach and when a team regroups. Contact comes about 2 to 3 seconds after the start, and then it becomes a close fight. Twelve of the styles (every formation and tactic, plus the Thach weave and the skid) are gauntlet opponents, placed after the hall of fame so the other opponents keep their battle seeds. All fifteen are in `train_population.py`'s opponent pool. Videos of each against m08 are on the [videos page](videos.html).
 
+### Colab run 3: crash penalties and the formation bots
+
+```bash
+python examples/train_population.py --size 6 --exploiters 1 --rounds 16 --samples-per-round 800000 \
+    --battles-per-worker 4 --tournament-battles 10 --device auto \
+    --founders run2/m05_r5.zip:guardian,run2/m05_r5.zip:evolved,run2/m04_r5.zip:pack
+```
+
+Run 2 (the same settings from m08, before the crash penalty) stopped after 5 rounds when Colab reclaimed the runtime; its best members (m05, m04) seeded run 3. Run 3 trained with the crash and friendly-fire penalties, and with every formation and tactic bot in the opponent pool, for 16 rounds of full battles (about 25 minutes each, 6.7 hours in all, about 10 Colab compute units). The evolved line took over again. The best member, m16 (a mutated copy of m11), averaged about 1,700 Elo over the last two rounds, against about 1,370 for the unchanged starting model. The exploiter never beat a leader (28 to 48%).
+
+| Team (40 fresh battles per opponent) | Gauntlet score | vs m08 | vs attention model | vs line bots | vs finger four bots | vs pincer bots |
+|---|---|---|---|---|---|---|
+| **Colab run 3 best (m16)** | **98%** | **80%** | **90%** | **100%** | **100%** | **92%** |
+| Colab m08 (before) | 83% | | 72% | 52% | 62% | 62% |
+
+This gauntlet includes the twelve formation bots, which is why m08 scores 83% here against 95% on the older one. Head to head over 100 fresh battles, m16 beat m08 88% of the time (+5.2 points per battle). The run-3 m16 is a different model from the league-era "population m16" in the hall of fame.
+
+Careless flying fell, but only a little. Over the same 12 battles against the default bots, m16 lost 43 ships to asteroids (17% of its deaths, down from m08's 19%) and 22 to friendly fire (9%, down from 11%), against 23 and 7 for the bots. It still loses about twice as many ships to its own mistakes as the bots do.
+
+Model `results/colab_run3_best.zip`; charts `results/gauntlet_run3.png`, `results/colab_run3_{elo,lineage}.png`; video: [m16 vs m08](results/colab_run3_vs_m08.mp4) (m16 wins 36.4 to 28.1).
+
 ### Where the training time goes
 
 On this 4-core CPU with the centralised critic, one PPO iteration splits about 49% PPO update, 29% battle simulation and 22% network inference. The collision checks and the scripted bot were sped up without changing any result: 12 full battles of trajectories and 288k bot actions are bit-identical, and the physics step is about 1.4x faster. That only saves about 5% end to end. The network maths is now the bottleneck, so a GPU (or fewer PPO epochs) is where a big speed-up would come from.
