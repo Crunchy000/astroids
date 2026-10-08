@@ -342,6 +342,10 @@ Careless flying fell, but only a little. Over the same 12 battles against the de
 
 Model `results/colab_run3_best.zip`; charts `results/gauntlet_run3.png`, `results/colab_run3_{elo,lineage}.png`; video: [m16 vs m08](results/colab_run3_vs_m08.mp4) (m16 wins 36.4 to 28.1).
 
+### Colab run 4: more of the same stops paying
+
+Run 4 restarted from run 3's best (m16 for the evolved and guardian lines, m11 for the pack line) with the same settings, planned for 24 rounds. From round 5 on, the unchanged copy of m16 led or tied every tournament, and by round 14 it led on 1,528 Elo against 1,433 for the best new member; the guardian line collapsed. The run was stopped after 14 rounds (about 6 hours, about 8 compute units), and m16 stays the best model. More rounds with the same rewards and learning rates no longer help; a lower learning rate or different rules are the next things to try. Chart: `results/colab_run4_elo.png`.
+
 ### Where the training time goes
 
 On this 4-core CPU with the centralised critic, one PPO iteration splits about 49% PPO update, 29% battle simulation and 22% network inference. The collision checks and the scripted bot were sped up without changing any result: 12 full battles of trajectories and 288k bot actions are bit-identical, and the physics step is about 1.4x faster. That only saves about 5% end to end. The network maths is now the bottleneck, so a GPU (or fewer PPO epochs) is where a big speed-up would come from.
