@@ -1,6 +1,19 @@
 {
   "sections": [
     {
+      "id": "best_vs_baseline",
+      "title": "Best trained team vs the baseline",
+      "summary": "The best team under the original rules, m10 from run 5a, against the default scripted bots the project started from. m10 wins all 40 gauntlet battles against them, by about 15 points on average.",
+      "videos": [
+        {
+          "src": "results/best_vs_baseline.mp4",
+          "title": "m10 vs the default scripted bots",
+          "note": "Seed 7. Blue (m10) wins 41.7 to 24.0.",
+          "poster": "results/best_vs_baseline.jpg"
+        }
+      ]
+    },
+    {
       "id": "dogfight",
       "title": "Dogfight rules and a lower learning rate",
       "summary": "Opt-in dogfight rules make the ships fly like aircraft: the velocity follows the nose, so nobody slides sideways or shoots backwards; the turn rate peaks at a middle speed (a full circle in 2.1 s, against 1.5 s before); hard turns bleed speed; and there are 4 asteroids instead of 7. Fine-tuning m16 under these rules for 30 rounds gave a dogfight specialist (m17) that beats m16 in 73 of 100 dogfight battles (+6.1 points per battle), though most of that came in the first eight rounds. Under the original rules, a lower learning rate (3e-5) and fewer games against the bots gave m10, which beats m16 in 63 of 100 battles by a very small margin; continuing from m10 stalled.",
