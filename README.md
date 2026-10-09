@@ -346,6 +346,22 @@ Model `results/colab_run3_best.zip`; charts `results/gauntlet_run3.png`, `result
 
 Run 4 restarted from run 3's best (m16 for the evolved and guardian lines, m11 for the pack line) with the same settings, planned for 24 rounds. From round 5 on, the unchanged copy of m16 led or tied every tournament, and by round 14 it led on 1,528 Elo against 1,433 for the best new member; the guardian line collapsed. The run was stopped after 14 rounds (about 6 hours, about 8 compute units), and m16 stays the best model. More rounds with the same rewards and learning rates no longer help; a lower learning rate or different rules are the next things to try. Chart: `results/colab_run4_elo.png`.
 
+### Runs 5 to 7: a lower learning rate, and dogfight rules
+
+**A lower learning rate (runs 5a and 7a).** Run 5a restarted from m16 with the founders' learning rate cut from 1e-4 to 3e-5 (`--lr 3e-5`) and the bots' share of training games cut from 30% to 10% (`--bots-share 0.1`), since m16 already beats every bot style. Its best member after 20 rounds, m10, beat m16 in 63 of 100 head-to-head battles, though by a tiny margin (−0.1 points per battle), and scored 99% on the gauntlet against m16's 98%. The gauntlet is now nearly saturated; head-to-head is the better test from here. Continuing from m10 (run 7a) stalled again: the unchanged copy of m10 led 7 of the first 9 rounds, so it was stopped. Model `results/colab_run5a_best.zip`; chart `results/gauntlet_run5a.png`; video: [m10 vs m16](results/colab_run5a_vs_m16.mp4) (one of the close ones m16 wins, 33.4 to 33.2).
+
+**Dogfight rules** (`--rules dogfight`, opt-in; `Config.dogfight()`): the competitive rules plus flight physics, and 4 asteroids instead of 7.
+
+* The velocity swings round to follow the nose (at up to 2.5 rad/s), so a ship can't slide sideways or spin round to shoot backwards.
+* The turn rate peaks at a corner speed of 150 px/s: a full circle takes 2.1 s there, 5.2 s from a standstill and 3.8 s flat out (it was 1.5 s at any speed).
+* Turning bleeds speed (`bleed`), so a hard turn costs energy that thrust has to win back.
+
+With the new physics, the tactics built around tails start to matter a little among the scripted bots: the Thach weave goes from 55% to 62% against the default bots, and the break turn from 40% to 48%.
+
+Run 5b fine-tuned m16 under the dogfight rules; its runtime was reclaimed after 9 rounds, and run 6b continued from its round-8 best for 22 more rounds. Under the dogfight rules, its best member (m17) beat m16, which never trained on the new physics, in 73 of 100 battles (+6.1 points per battle), but only broke even with run 5b's round-8 best (53%, −0.1): most of the adaptation came in the first eight rounds. m16 copes surprisingly well with the new physics, and both score 97 to 99% on the dogfight gauntlet. Model `results/dogfight_best.zip`; chart `results/gauntlet_dogfight.png`; videos: [dogfight best vs m16](results/dogfight_best_vs_m16.mp4) (39.3 to 31.3) and [vs the Thach weave bots](results/dogfight_best_vs_thach.mp4) (44.8 to 23.6).
+
+Runs 5 to 7 used about 37 Colab compute units in all.
+
 ### Where the training time goes
 
 On this 4-core CPU with the centralised critic, one PPO iteration splits about 49% PPO update, 29% battle simulation and 22% network inference. The collision checks and the scripted bot were sped up without changing any result: 12 full battles of trajectories and 288k bot actions are bit-identical, and the physics step is about 1.4x faster. That only saves about 5% end to end. The network maths is now the bottleneck, so a GPU (or fewer PPO epochs) is where a big speed-up would come from.

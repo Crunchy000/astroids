@@ -1,6 +1,70 @@
 {
   "sections": [
     {
+      "id": "dogfight",
+      "title": "Dogfight rules and a lower learning rate",
+      "summary": "Opt-in dogfight rules make the ships fly like aircraft: the velocity follows the nose, so nobody slides sideways or shoots backwards; the turn rate peaks at a middle speed (a full circle in 2.1 s, against 1.5 s before); hard turns bleed speed; and there are 4 asteroids instead of 7. Fine-tuning m16 under these rules for 30 rounds gave a dogfight specialist (m17) that beats m16 in 73 of 100 dogfight battles (+6.1 points per battle), though most of that came in the first eight rounds. Under the original rules, a lower learning rate (3e-5) and fewer games against the bots gave m10, which beats m16 in 63 of 100 battles by a very small margin; continuing from m10 stalled.",
+      "table": {
+        "columns": [
+          "Head to head (100 fresh battles)",
+          "Rules",
+          "Win rate",
+          "Margin per battle"
+        ],
+        "rows": [
+          [
+            "Dogfight best (m17) vs m16",
+            "dogfight",
+            "73%",
+            "+6.1"
+          ],
+          [
+            "Dogfight best (m17) vs run 5b round-8 best",
+            "dogfight",
+            "53%",
+            "−0.1"
+          ],
+          [
+            "Run 5a best (m10) vs m16",
+            "competitive",
+            "63%",
+            "−0.1"
+          ]
+        ],
+        "highlight": 0
+      },
+      "charts": [
+        {
+          "src": "results/gauntlet_dogfight.png",
+          "alt": "Dogfight-rules gauntlet win rates for the dogfight best (m17, score 97%) and m16 (99%). Both win 100% against the bots and the league striker; m17 wins 78% vs the attention model and 90% vs m08, m16 88% and 90%; both win 92 to 100% against every formation bot."
+        },
+        {
+          "src": "results/gauntlet_run5a.png",
+          "alt": "Gauntlet win rates under the original rules for run 5a's best (m10, score 99%) and m16 (98%). m10 wins 100% vs the attention model (m16: 90%) and 85% vs m08 (m16: 80%), and 95 to 100% against every formation bot."
+        }
+      ],
+      "videos": [
+        {
+          "src": "results/dogfight_best_vs_m16.mp4",
+          "title": "Dogfight rules: dogfight best (m17) vs m16",
+          "note": "Seed 7. Blue (m17, trained on the new physics) wins 39.3 to 31.3.",
+          "poster": "results/dogfight_best_vs_m16.jpg"
+        },
+        {
+          "src": "results/dogfight_best_vs_thach.mp4",
+          "title": "Dogfight rules: dogfight best (m17) vs Thach weave bots",
+          "note": "Seed 11. Blue (m17) wins 44.8 to 23.6.",
+          "poster": "results/dogfight_best_vs_thach.jpg"
+        },
+        {
+          "src": "results/colab_run5a_vs_m16.mp4",
+          "title": "Original rules: run 5a best (m10) vs m16",
+          "note": "Seed 7. One of the close battles m16 wins, 33.4 to 33.2.",
+          "poster": "results/colab_run5a_vs_m16.jpg"
+        }
+      ]
+    },
+    {
       "id": "colab_run3",
       "title": "Colab run 3: crash penalties and formation opponents",
       "summary": "Six attention-model teams plus one exploiter, trained for 16 rounds of full battles on a Colab L4 GPU (6.7 hours) with the new crash and friendly-fire penalties and every formation and tactic bot in the opponent pool. The best member, m16, scored 98% on the gauntlet with the formation bots, against 83% for m08, and beat m08 in 88 of 100 fresh battles. It wins 92 to 100% against every formation, including the line, finger four and pincer that gave m08 trouble. It crashes a little less than m08 (17% of deaths from asteroids, down from 19%; friendly fire 9%, down from 11%), but still about twice as often as the scripted bots.",
