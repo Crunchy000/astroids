@@ -86,7 +86,10 @@ def cmd_league(a) -> None:
     finally:
         for c in containers:
             c.stop()
-    md = leaderboard_markdown(results, a.title)
+    note = (f"{a.games_per_pair} matches per pair, half on each side; "
+            + ("turn by turn" if a.turn_based else "real time, 33 ms per decision")
+            + ("; the plain competitive rules." if a.fixed else "; match settings drawn at random."))
+    md = leaderboard_markdown(results, a.title, note)
     if a.leaderboard:
         with open(a.leaderboard, "w") as f:
             f.write(md)

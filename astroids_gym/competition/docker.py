@@ -58,7 +58,11 @@ class Container:
             self.id = _run("run", "-d", "--rm", "-p", f"127.0.0.1::{PORT}", *limits, self.image)
             host_port = _run("port", self.id, f"{PORT}/tcp").splitlines()[0].rsplit(":", 1)[1]
             self.url = f"ws://127.0.0.1:{host_port}/ws"
-        self._wait_ready(ready_timeout)
+        try:
+            self._wait_ready(ready_timeout)
+        except BaseException:
+            self.stop()  # don't leave a broken entry running
+            raise
         return self
 
     def _wait_ready(self, timeout: float) -> None:
