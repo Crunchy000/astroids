@@ -55,6 +55,7 @@ def parse(argv=None):
     a.add_argument("--seed", type=int, default=0)
     a.add_argument("--save-every", type=int, default=50)
     a.add_argument("--init", default=None, help="start from this params .npz")
+    a.add_argument("--vf-warmup", type=int, default=0, help="iterations that train only the value head (use with --init)")
     a.add_argument("--resume", action="store_true")
     return a.parse_args(argv)
 
@@ -146,20 +147,20 @@ def make_fns(cfg, bank):
 
     v_eval = jax.vmap(lambda p, s, me, i, a: policy.evaluate(p, heads, s, me, i, a), in_axes=(None, 0, 0, 0, 0))
 
-    def loss_fn(params, mb, ent_coef):
+    def loss_fn(params, mb, ent_coef, pol_coef):
         logp, ent, value = v_eval(params, mb["s"], mb["me"], mb["idx"], mb["aidx"])
         ratio = jnp.exp(logp - mb["logp"])
         adv = (mb["adv"] - mb["adv"].mean()) / (mb["adv"].std() + 1e-8)
         pg = -jnp.minimum(ratio * adv, jnp.clip(ratio, 1 - cfg.clip, 1 + cfg.clip) * adv).mean()
         v_clip = mb["value"] + jnp.clip(value - mb["value"], -cfg.clip, cfg.clip)
         vl = 0.5 * jnp.maximum((value - mb["ret"]) ** 2, (v_clip - mb["ret"]) ** 2).mean()
-        loss = pg + cfg.vf * vl - ent_coef * ent.mean()
+        loss = pol_coef * (pg - ent_coef * ent.mean()) + cfg.vf * vl
         return loss, dict(pg=pg, vf=vl, ent=ent.mean(), kl=((ratio - 1) - jnp.log(ratio)).mean(),
                           clipfrac=(jnp.abs(ratio - 1) > cfg.clip).mean())
 
     opt = optax.chain(optax.clip_by_global_norm(0.5), optax.adam(cfg.lr, eps=1e-5))
 
-    def update(params, opt_state, traj, last_value, key, ent_coef):
+    def update(params, opt_state, traj, last_value, key, ent_coef, pol_coef):
         adv, ret = gae(traj, last_value)
         data = dict(s=traj["s"], me=traj["me"], idx=traj["idx"], aidx=traj["aidx"], logp=traj["logp"],
                     value=traj["value"], adv=adv, ret=ret)
@@ -174,7 +175,7 @@ def make_fns(cfg, bank):
             def mb_step(c, ix):
                 params, opt_state = c
                 mb = jax.tree.map(lambda x: x[ix], data)
-                (_, m), g = jax.value_and_grad(loss_fn, has_aux=True)(params, mb, ent_coef)
+                (_, m), g = jax.value_and_grad(loss_fn, has_aux=True)(params, mb, ent_coef, pol_coef)
                 upd, opt_state = opt.update(g, opt_state, params)
                 return (optax.apply_updates(params, upd), opt_state), m
 
@@ -255,7 +256,8 @@ def main(argv=None):
         carry, traj, last_value = fns["rollout"](params, opp_params, opp_type, carry, k1)
         frac = it / max(cfg.iters - 1, 1)
         ent_coef = cfg.ent + (cfg.ent_end - cfg.ent) * frac
-        params, opt_state, m = fns["update"](params, opt_state, traj, last_value, k2, ent_coef)
+        pol_coef = 0.0 if it < cfg.vf_warmup else 1.0
+        params, opt_state, m = fns["update"](params, opt_state, traj, last_value, k2, ent_coef, pol_coef)
         done = np.asarray(traj["done"])
         outcome = np.asarray(traj["outcome"])
         ot = np.asarray(opp_type)
