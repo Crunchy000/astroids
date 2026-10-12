@@ -29,6 +29,8 @@ def agent_fn(kind, params=None, heads=4, sample=False):
         return baselines.careful_random
     if kind == "nothing":
         return baselines.do_nothing
+    if kind == "sniper":
+        return baselines.sniper
     return lambda s, me, k: policy.sample(params, heads, s, me, k, greedy=not sample)[0]
 
 
@@ -59,7 +61,7 @@ def play(fa, fb, bank, key, max_steps=2001):
 def main(argv=None):
     a = argparse.ArgumentParser()
     a.add_argument("model")
-    a.add_argument("--vs", default="greedy,random", help="greedy, random, nothing, or .npz paths (comma separated)")
+    a.add_argument("--vs", default="greedy,random", help="greedy, random, sniper, nothing, or .npz paths (comma separated)")
     a.add_argument("--games", type=int, default=256, help="maps (each played from both sides)")
     a.add_argument("--batch", type=int, default=256)
     a.add_argument("--seed", type=int, default=12345)

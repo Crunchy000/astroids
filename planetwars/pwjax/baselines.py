@@ -34,3 +34,36 @@ def careful_random(s: State, player, key):
     go = jnp.any(mine) & jnp.any(theirs)
     return (jnp.where(go, src, -1).astype(jnp.int32), jnp.where(go, dst, -1).astype(jnp.int32),
             jnp.where(go, s.ships[src] / 2, 0.0).astype(s.ships.dtype))
+
+
+def sniper(s: State, player, key=None):
+    """A stronger hand-written agent (ours, not from the competition): sends just enough ships.
+
+    Every free planet with spare ships (beyond what it needs to survive fleets already heading to
+    it) may attack; targets are scored by growth gained per ship and tick spent, accounting for the
+    target's growth on the way and every fleet already heading there.
+    """
+    n = s.ships.shape[0]
+    opp = 3 - player
+    mine = s.valid & (s.owner == player)
+    to = (s.tr_dest[:, None] == jnp.arange(n)[None, :]) & s.tr_on[:, None]
+    my_in = jnp.sum(jnp.where(to & (s.tr_owner == player)[:, None], s.tr_ships[:, None], 0.0), axis=0)
+    opp_in = jnp.sum(jnp.where(to & (s.tr_owner == opp)[:, None], s.tr_ships[:, None], 0.0), axis=0)
+    keep = jnp.maximum(opp_in - my_in, 0.0)
+    avail = jnp.where(mine & ~s.tr_on, s.ships - keep, 0.0)
+    d = jnp.sqrt(jnp.sum((s.pos[:, None, :] - s.pos[None, :, :]) ** 2, axis=-1))
+    eta = d / s.speed
+    is_opp = (s.owner == opp)[None, :]
+    is_neu = (s.owner == 0)[None, :]
+    defense = jnp.where(is_opp, s.ships[None, :] + s.growth[None, :] * eta, s.ships[None, :]) \
+        + opp_in[None, :] - my_in[None, :]
+    need = defense + 2.0
+    target = s.valid[None, :] & (is_opp | is_neu)
+    ok = target & (avail[:, None] > need) & (need > 0) & (avail[:, None] > 5)
+    score = s.growth[None, :] * jnp.where(is_opp, 2.0, 1.0) / (need + 5.0 + 0.5 * eta)
+    score = jnp.where(ok, score, -jnp.inf)
+    flat = jnp.argmax(score.reshape(-1))
+    i, j = flat // n, flat % n
+    go = jnp.any(ok)
+    return (jnp.where(go, i, -1).astype(jnp.int32), jnp.where(go, j, -1).astype(jnp.int32),
+            jnp.where(go, need[i, j], 0.0).astype(s.ships.dtype))

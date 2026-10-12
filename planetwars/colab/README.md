@@ -9,7 +9,8 @@ tar czf /tmp/pw.tgz --exclude='__pycache__' --exclude='entry/model.npz' pwjax en
 colab new -s pw --gpu L4
 colab upload -s pw /tmp/pw.tgz /content/pw.tgz
 colab exec -s pw < colab/setup.py                  # unpack, check the GPU, install optax if missing
-RUN=pw1 ARGS="--envs 2048 --iters 3000" python colab/make_launch.py | colab exec -s pw
+RUN=bc1 MOD=pwjax.bc ARGS="--envs 2048 --iters 400" python colab/make_launch.py | colab exec -s pw
+RUN=pw1 ARGS="--init /content/runs/bc1/latest.npz --vf-warmup 20" python colab/make_launch.py | colab exec -s pw
 colab exec -s pw < colab/status.py                 # tail of every run's log
 colab download -s pw /content/runs/pw1/latest.npz runs/pw1/latest.npz
 colab stop -s pw                                    # stops billing
