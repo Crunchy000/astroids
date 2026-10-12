@@ -1,8 +1,0 @@
-# Only what an entry image needs (the results folder holds hundreds of MB of videos).
-*
-!pyproject.toml
-!README.md
-!astroids_gym/
-!competition/models/
-!entry/
-**/__pycache__
