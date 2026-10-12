@@ -8,3 +8,4 @@ runs/
 models/
 *.zip
 !results/*.zip
+!competition/models/
