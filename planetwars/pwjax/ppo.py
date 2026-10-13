@@ -2,8 +2,13 @@
 
 Thousands of games run in lockstep under `jax.vmap`; a rollout is one `lax.scan`. The learner plays
 one side of every game. The other side is, per group of games: the learner itself, an older snapshot
-of it, the official greedy heuristic agent, or the official careful random agent. Opponents are
-reassigned (and every game restarted) each "round", which is long enough for a full game.
+of it, the official greedy heuristic agent, the official careful random agent, or (optionally) an
+all-in rush bot. Opponents are reassigned (and every game restarted) each "round", which is long
+enough for a full game.
+
+Two optional guards against self-play going in circles: `--anchors` adds frozen older models that
+stay in the opponent pool for the whole run, and `--gate-every` plays the learner against the best
+model so far on fresh maps and keeps the winner in `best.npz`.
 
     python -m pwjax.ppo --out runs/pw1 --envs 2048 --iters 3000
 """
@@ -19,10 +24,10 @@ import jax.numpy as jnp
 import numpy as np
 import optax
 
-from . import baselines, env, maps, policy
+from . import baselines, env, evaluate, maps, policy
 
-OPP_SELF, OPP_POOL, OPP_GREEDY, OPP_RANDOM = 0, 1, 2, 3
-OPP_NAMES = ("self", "pool", "greedy", "random")
+OPP_SELF, OPP_POOL, OPP_GREEDY, OPP_RANDOM, OPP_RUSH = 0, 1, 2, 3, 4
+OPP_NAMES = ("self", "pool", "greedy", "random", "rush")
 
 
 def parse(argv=None):
@@ -34,10 +39,11 @@ def parse(argv=None):
     a.add_argument("--round", type=int, default=16, help="rollouts per opponent assignment")
     a.add_argument("--iters", type=int, default=3000)
     a.add_argument("--maps", type=int, default=50000)
-    a.add_argument("--opp-probs", default="0.3,0.4,0.2,0.1", help="self,pool,greedy,random")
+    a.add_argument("--opp-probs", default="0.3,0.4,0.2,0.1", help="self,pool,greedy,random[,rush]")
     a.add_argument("--pool-size", type=int, default=12)
     a.add_argument("--pool-every", type=int, default=32, help="iterations between snapshots")
     a.add_argument("--lr", type=float, default=3e-4)
+    a.add_argument("--lr-end", type=float, default=None, help="learning rate at the last iteration (linear decay; default: constant)")
     a.add_argument("--gamma", type=float, default=0.999)
     a.add_argument("--lam", type=float, default=0.95)
     a.add_argument("--clip", type=float, default=0.2)
@@ -57,6 +63,10 @@ def parse(argv=None):
     a.add_argument("--init", default=None, help="start from this params .npz")
     a.add_argument("--vf-warmup", type=int, default=0, help="iterations that train only the value head (use with --init)")
     a.add_argument("--resume", action="store_true")
+    a.add_argument("--anchors", default="", help="frozen .npz models that stay in the opponent pool (comma separated)")
+    a.add_argument("--gate-every", type=int, default=0, help="iterations between gate games vs the best model (0: off)")
+    a.add_argument("--gate-games", type=int, default=64, help="maps per gate (each played from both sides)")
+    a.add_argument("--gate-threshold", type=float, default=0.55, help="score vs the best model needed to replace it")
     return a.parse_args(argv)
 
 
@@ -87,6 +97,8 @@ def make_fns(cfg, bank):
     v_leader = jax.vmap(env.leader)
     v_greedy = jax.vmap(baselines.greedy)
     v_random = jax.vmap(baselines.careful_random)
+    v_rush = jax.vmap(baselines.rush)
+    use_rush = len(cfg.opp_probs.split(",")) > OPP_RUSH and float(cfg.opp_probs.split(",")[OPP_RUSH]) > 0
 
     def reset(key):
         k1, k2 = jax.random.split(key)
@@ -110,6 +122,9 @@ def make_fns(cfg, bank):
             rn = v_random(s, opp_me, jax.random.split(k3, E))
             o_act = tuple(jnp.where(opp_type == OPP_GREEDY, g, jnp.where(opp_type == OPP_RANDOM, r, o))
                           for o, g, r in zip(o_act, gr, rn))
+            if use_rush:
+                rs = v_rush(s, opp_me)
+                o_act = tuple(jnp.where(opp_type == OPP_RUSH, x, o) for o, x in zip(o_act, rs))
             a1 = tuple(jnp.where(me == 1, x, y) for x, y in zip(act, o_act))
             a2 = tuple(jnp.where(me == 2, x, y) for x, y in zip(act, o_act))
             s2 = v_step(s, a1, a2)
@@ -158,9 +173,10 @@ def make_fns(cfg, bank):
         return loss, dict(pg=pg, vf=vl, ent=ent.mean(), kl=((ratio - 1) - jnp.log(ratio)).mean(),
                           clipfrac=(jnp.abs(ratio - 1) > cfg.clip).mean())
 
-    opt = optax.chain(optax.clip_by_global_norm(0.5), optax.adam(cfg.lr, eps=1e-5))
+    # adam at unit rate; the learning rate is applied per step so it can change over the run
+    opt = optax.chain(optax.clip_by_global_norm(0.5), optax.adam(1.0, eps=1e-5))
 
-    def update(params, opt_state, traj, last_value, key, ent_coef, pol_coef):
+    def update(params, opt_state, traj, last_value, key, ent_coef, pol_coef, lr):
         adv, ret = gae(traj, last_value)
         data = dict(s=traj["s"], me=traj["me"], idx=traj["idx"], aidx=traj["aidx"], logp=traj["logp"],
                     value=traj["value"], adv=adv, ret=ret)
@@ -177,6 +193,7 @@ def make_fns(cfg, bank):
                 mb = jax.tree.map(lambda x: x[ix], data)
                 (_, m), g = jax.value_and_grad(loss_fn, has_aux=True)(params, mb, ent_coef, pol_coef)
                 upd, opt_state = opt.update(g, opt_state, params)
+                upd = jax.tree.map(lambda u: lr * u, upd)
                 return (optax.apply_updates(params, upd), opt_state), m
 
             return jax.lax.scan(mb_step, (params, opt_state), perm)
@@ -185,6 +202,19 @@ def make_fns(cfg, bank):
         return params, opt_state, jax.tree.map(jnp.mean, m)
 
     return dict(reset=jax.jit(reset), rollout=jax.jit(rollout), update=jax.jit(update), opt=opt)
+
+
+def make_gate(cfg):
+    """Score of `a` against `b` (argmax play, both sides) on a fixed set of fresh league maps."""
+    bank = {k: jnp.asarray(v) for k, v in
+            maps.make_bank(cfg.gate_games, seed=cfg.seed + 1000, param_fn=maps.cog2026_params).items()}
+
+    def run(pa, pb, key):
+        fa = lambda s, me, k: policy.sample(pa, cfg.heads, s, me, k, greedy=True)[0]  # noqa: E731
+        fb = lambda s, me, k: policy.sample(pb, cfg.heads, s, me, k, greedy=True)[0]  # noqa: E731
+        return evaluate.play(fa, fb, bank, key)[0].mean()
+
+    return jax.jit(run)
 
 
 def save_params(path, params, cfg):
@@ -222,6 +252,10 @@ def main(argv=None):
         params = load_params(cfg.init)
     opt_state = fns["opt"].init(params)
     pool = [params]
+    anchors = [load_params(p) for p in cfg.anchors.split(",") if p]
+    best = params
+    best_path = os.path.join(cfg.out, "best.npz")
+    gate = make_gate(cfg) if cfg.gate_every else None
     start = 0
     log_path = os.path.join(cfg.out, "log.jsonl")
     ckpt = os.path.join(cfg.out, "ckpt.pkl")
@@ -230,9 +264,13 @@ def main(argv=None):
             st = pickle.load(f)
         params, opt_state, start, key = st["params"], st["opt_state"], st["iter"], st["key"]
         pool = st["pool"]
+        best = load_params(best_path) if os.path.exists(best_path) else params
         print("resumed at iteration", start, flush=True)
+    if gate and not os.path.exists(best_path):
+        save_params(best_path, best, cfg)
     probs = np.array([float(x) for x in cfg.opp_probs.split(",")])
     probs = probs / probs.sum()
+    assert len(probs) <= len(OPP_NAMES)
     host_rng = np.random.default_rng(cfg.seed + start)
     G, Eg = cfg.groups, cfg.envs // cfg.groups
     carry = None
@@ -240,11 +278,12 @@ def main(argv=None):
     t_last = time.time()
     for it in range(start, cfg.iters):
         if it % cfg.round == 0 or carry is None:
-            types = host_rng.choice(4, size=G, p=probs)
+            types = host_rng.choice(len(probs), size=G, p=probs)
             group_params = []
             for t in types:
                 if t == OPP_POOL:
-                    group_params.append(pool[host_rng.integers(len(pool))])
+                    candidates = anchors + pool
+                    group_params.append(candidates[host_rng.integers(len(candidates))])
                 else:
                     group_params.append(params)
             opp_params = jax.tree.map(lambda *xs: jnp.stack(xs), *group_params)
@@ -257,7 +296,8 @@ def main(argv=None):
         frac = it / max(cfg.iters - 1, 1)
         ent_coef = cfg.ent + (cfg.ent_end - cfg.ent) * frac
         pol_coef = 0.0 if it < cfg.vf_warmup else 1.0
-        params, opt_state, m = fns["update"](params, opt_state, traj, last_value, k2, ent_coef, pol_coef)
+        lr = cfg.lr + ((cfg.lr if cfg.lr_end is None else cfg.lr_end) - cfg.lr) * frac
+        params, opt_state, m = fns["update"](params, opt_state, traj, last_value, k2, ent_coef, pol_coef, lr)
         done = np.asarray(traj["done"])
         outcome = np.asarray(traj["outcome"])
         ot = np.asarray(opp_type)
@@ -283,6 +323,17 @@ def main(argv=None):
             with open(log_path, "a") as f:
                 f.write(json.dumps(row) + "\n")
             stats = {n: np.zeros(3) for n in OPP_NAMES}
+        if gate and (it + 1) % cfg.gate_every == 0:
+            key, kg = jax.random.split(key)
+            score = float(gate(params, best, kg))
+            promoted = score >= cfg.gate_threshold
+            if promoted:
+                best = params
+                save_params(best_path, best, cfg)
+            row = dict(iter=it + 1, gate_vs_best=round(score, 3), promoted=promoted)
+            print(json.dumps(row), flush=True)
+            with open(os.path.join(cfg.out, "gate.jsonl"), "a") as f:
+                f.write(json.dumps(row) + "\n")
         if (it + 1) % cfg.save_every == 0 or it + 1 == cfg.iters:
             save_params(os.path.join(cfg.out, "latest.npz"), params, cfg)
             with open(ckpt + ".tmp", "wb") as f:

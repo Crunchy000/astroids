@@ -122,3 +122,27 @@ def test_forward_model_and_greedy_match_official(seed):
         s = step(s, as_tuple(actions[Player.Player1]), as_tuple(actions[Player.Player2]))
         model.step(actions)
     assert int(leader(s)) == OWNER[model.get_leader()]
+
+
+def test_rush_is_greedy_that_sends_everything():
+    random.seed(3)
+    params = GameParams(num_planets=16, max_ticks=300)
+    gs = GameStateFactory(params).create_game()
+    model = ForwardModel(gs, params)
+    s = to_state(gs, params)
+    agent = {p: GreedyHeuristicAgent() for p in (Player.Player1, Player.Player2)}
+    for p, a in agent.items():
+        a.prepare_to_play_as(p, params)
+    launched = 0
+    rush = jax.jit(baselines.rush)
+    while not model.is_terminal():
+        for p in agent:
+            gsrc, gdst, _ = (np.asarray(x).item() for x in greedy(s, OWNER[p]))
+            src, dst, num = (np.asarray(x).item() for x in rush(s, OWNER[p]))
+            assert (src, dst) == (gsrc, gdst)
+            assert num == (float(s.ships[src]) if src >= 0 else 0.0)
+            launched += src >= 0
+        actions = {p: agent[p].get_action(gs) for p in agent}
+        s = step(s, as_tuple(actions[Player.Player1]), as_tuple(actions[Player.Player2]))
+        model.step(actions)
+    assert launched > 0

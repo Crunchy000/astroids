@@ -24,6 +24,13 @@ def greedy(s: State, player, key=None):
             jnp.where(go, s.ships[src] / 2, 0.0).astype(s.ships.dtype))
 
 
+def rush(s: State, player, key=None):
+    """The greedy agent's targeting, but every launch sends all of the source planet's ships."""
+    src, dst, _ = greedy(s, player)
+    go = src >= 0
+    return src, dst, jnp.where(go, s.ships[jnp.maximum(src, 0)], 0.0).astype(s.ships.dtype)
+
+
 def careful_random(s: State, player, key):
     """CarefulRandomAgent: a random free planet of ours attacks a random enemy planet with half its ships."""
     k1, k2 = jax.random.split(key)
