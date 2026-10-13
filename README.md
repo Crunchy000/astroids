@@ -4,6 +4,8 @@ Two fleets of five triangle ships fight it out in an Asteroids-style arena.
 
 - **Watch it in the browser:** https://crunchy000.github.io/astorids/ (`index.html`, scripted AI on both sides). It has synthesised sound effects (lasers, hits, explosions, asteroid thuds, panned by position): press any key to start audio, and M to mute.
 - **Train agents in Python:** `astroids_gym`, a [Gymnasium](https://gymnasium.farama.org/) (the maintained successor to OpenAI Gym) and [PettingZoo](https://pettingzoo.farama.org/) port of the same game.
+- **Enter a team in the competition:** [`competition/`](competition/README.md) runs the game as an AI competition in the [Planet Wars RTS](https://simonlucas.github.io/planet-wars-rts/) format: Docker entries that fly a team over a WebSocket, real-time matches with random settings, and a TrueSkill [leaderboard](competition/leaderboard.md).
+- **Separate project, Planet Wars:** [`planetwars/`](planetwars/README.md) is our entry for the Planet Wars RTS game itself, trained with JAX on a GPU. It has its own code, tests and Dockerfile and doesn't touch the asteroids game.
 
 ## Rules
 
@@ -365,6 +367,16 @@ Runs 5 to 7 used about 37 Colab compute units in all.
 ### Where the training time goes
 
 On this 4-core CPU with the centralised critic, one PPO iteration splits about 49% PPO update, 29% battle simulation and 22% network inference. The collision checks and the scripted bot were sped up without changing any result: 12 full battles of trajectories and 288k bot actions are bit-identical, and the physics step is about 1.4x faster. That only saves about 5% end to end. The network maths is now the bottleneck, so a GPU (or fewer PPO epochs) is where a big speed-up would come from.
+
+## Competition
+
+```bash
+pip install -e ".[competition,fast]"
+python -m astroids_gym.competition match entry.my_agent:MyAgent competition/models/m10.npz --realtime
+python -m astroids_gym.competition league --entries-file competition/entries.json --games-per-pair 10 --workers 3
+```
+
+`astroids_gym.competition` turns the battle into an open AI competition in the format of [Planet Wars RTS](https://simonlucas.github.io/planet-wars-rts/). An agent flies a whole team through the same interface Planet Wars uses (`prepareToPlayAs`, `getAction`, `processGameOver`), gets the full game state as JSON every decision step, and can rebuild it as a `Simulation` to use as a forward model. Entries are Docker images that serve the agent over a WebSocket on port 8080, in the Planet Wars wire format, so any language works. Matches run in real time (33 ms per decision; a late team coasts and then acts on stale information), and each match draws its asteroids, respawns, zone size, gun range and flight physics at random. Entries are submitted by opening an issue that links to a commit. A workflow builds and plays them against the baselines, and a TrueSkill league ranks everyone. Through the new interface the trained teams play as well as before (m10 beat the default bots in 20 of 20 battles either way, and population m16 in 19 of 20 against 18 natively). In the first league (12 entries, 10 matches per pair, 660 real-time matches) m10 came top, winning 89% of its matches. The 60-line example entry (`entry/my_agent.py`), which aims with the bots' lead calculation and uses the forward model to steer clear of shots and asteroids, came fourth with 77%, behind m10, run 3's m16 and the dogfight m17 but ahead of every other model ([leaderboard](competition/leaderboard.md)). The details, the JSON and how to enter are in [`competition/README.md`](competition/README.md).
 
 ## Videos
 
