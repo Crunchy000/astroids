@@ -18,10 +18,12 @@ planetwars/
     main.py        GameServerAgent(host="0.0.0.0", port=8080, agent=NeuralAgent())
     agent.py       the neural agent (numpy only)
     pwnet.py       features + network, shared verbatim with training (numpy or jax.numpy)
-    model.npz      trained weights
+    model.npz      trained weights (self-play iteration 450)
     selfcheck.py   play the official sample agents in the official Python engine
     core/ agents/ client_server/   vendored from planet-wars-rts (MIT, see LICENSE-planet-wars-rts)
   tests/           parity tests against the official engine
+  tools/           record_game.py (render a game as an MP4), remote_match.py
+  media/           a recorded game against their greedy agent
 ```
 
 ## How the agent works
@@ -31,6 +33,32 @@ fleets heading to it) through a small transformer, then scores every legal (sour
 launch plus "do nothing", and picks a fleet size: a quarter, half, three quarters or all of the
 source's ships, or just enough to take the target (with or without a margin). Player 2 sees the
 map mirrored, so the network always plays from the left.
+
+## Results
+
+Training ran on Colab L4 GPUs and stopped when the iteration-550 snapshot won only 37% of its games
+against iteration 450, so iteration 450 is the model in `entry/model.npz`. Win rates come from
+`pwjax.evaluate` on fresh league maps, each played from both sides (128 to 256 games per row);
+"stronger bot" is our own hand-written agent that sends just enough ships.
+
+| Iteration | vs their greedy agent | vs our stronger bot | vs the iteration before |
+|---:|---:|---:|---:|
+| 0 (copies greedy) | 50% | 39% | |
+| 125 | 84% | 89% | 83% (vs 0) |
+| 150 | 92% | 93% | 81% (vs 125) |
+| 225 | 98% | 95% | 80% (vs 150) |
+| 275 | 99% | 96% | 76% (vs 225) |
+| 325 | 100% | 96% | 73% (vs 275) |
+| **450 (shipped)** | 99% | 98% | 86% (vs 325) |
+| 550 | 98% | 98% | 37% (vs 450) |
+
+Iteration 450 also passes their own submission check (`runEvaluation` in their Kotlin repo) 12 of 12
+games against their sample agents, with no timeouts and a 9 ms average move.
+
+![Our model (blue) against their greedy agent (orange)](media/game_vs_greedy.png)
+
+[Watch the whole game](media/game_vs_greedy.mp4): our model wins on a 30-planet league map at tick 722.
+Record another with `python tools/record_game.py --seed 7 --out game.mp4`.
 
 ## Checks
 

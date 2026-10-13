@@ -9,3 +9,5 @@ models/
 *.zip
 !results/*.zip
 !competition/models/
+public/
+_site/
