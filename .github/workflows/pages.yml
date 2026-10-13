@@ -20,12 +20,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Build site
+        # the game, the video gallery and the docs (see tools/build_site.py)
         run: |
-          mkdir -p _site/results
-          cp index.html videos.html _site/
-          cp results/videos.json results/*.mp4 results/*.png results/*.jpg _site/results/
-          touch _site/.nojekyll
+          pip install markdown
+          python tools/build_site.py --out _site --source-url "https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/"
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
