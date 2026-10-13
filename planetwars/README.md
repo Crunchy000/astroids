@@ -85,6 +85,32 @@ Maps follow the league's `GameParamGenerator.randomParams()` (10 to 30 planets, 
 2 to 5, growth 0.05 to 0.2), with some default-rule maps mixed in because the submission check
 plays 20-planet default maps for 1000 ticks.
 
+### Past iteration 450
+
+Every attempt to carry on from the iteration 450 weights (about 30 minutes each on an A100, 58M to
+136M steps) drifted below it when played head-to-head, and none produced a clearly stronger model.
+"Gate" is the new model's score against 450 during training (64 to 128 maps, both sides, argmax play);
+the final columns are the end-of-run model on 256 maps.
+
+| Run | Best gate vs 450 | Final vs 450 | Final vs rush bot |
+|---|---:|---:|---:|
+| Old settings: learning rate 1e-4, entropy 0.003 to 0.001 | 57% (iteration 80) | 18% | 80% |
+| Rush bot and anchors, learning rate 2e-4, entropy 0.005 to 0.002 | 27% | 30% | 88% |
+| Rush bot and anchors, learning rate 1e-4 decayed to 5e-6, entropy 0.003 to 0.001 | 55% (iteration 80) | 30% | 93% |
+| The same with one epoch per batch and twice the batch | 48% | 36% | 90% |
+| The same, grown to 6 layers | 46% | 18% (gate, iteration 140) | not run |
+| The same, grown to 6 layers, learning rate 3e-4 decayed to 1e-5 | 37% | 27% (gate, iteration 140) | not run |
+
+Iteration 450 itself scores 84% against the rush bot (the greedy agent sending every ship), 99%
+against greedy and 99% against our stronger bot. The snapshot at iteration 80 of the decayed-rate
+run played level with 450 (52%) and beat the rush bot 90% of the time; it is not shipped.
+
+Options added for these runs, all off by default: `--opp-probs` takes a fifth value for the rush
+bot, `--anchors a.npz,b.npz` keeps frozen models in the opponent pool, `--gate-every N` plays the
+learner against the best model so far and keeps the winner in `best.npz`, `--lr-end` decays the
+learning rate, and `python -m pwjax.grow in.npz out.npz --layers 6` adds layers that start as
+no-ops, so the deeper model plays exactly like the original.
+
 ## Submitting
 
 Their bot builds the `Dockerfile` at the root of a repository, so the entry goes in a repo of its
