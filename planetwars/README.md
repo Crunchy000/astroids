@@ -111,6 +111,24 @@ learner against the best model so far and keeps the winner in `best.npz`, `--lr-
 learning rate, and `python -m pwjax.grow in.npz out.npz --layers 6` adds layers that start as
 no-ops, so the deeper model plays exactly like the original.
 
+### Look-ahead search (not used)
+
+`entry/search.py` puts a short search on top of the model: candidate moves are played on a copy of the
+game with the official rules, both sides then follow a cheap scripted player for 40 to 50 ticks, and
+the model's value estimate scores the result. It runs with `PW_SEARCH=1` (see `serve_port` style
+launch in the notes) and is off by default. It did not make the agent stronger:
+
+| Version | Result |
+|---|---|
+| Network's top 8 moves, greedy fast-forward | 6 of 6 against greedy; 2 of 24 against TeamTitansAgentV3 (plain model: 1 of 72) |
+| Best target per free planet, greedy's move and no-op, greedy fast-forward | 37 of 80 (46%) against the plain model |
+| The same, no further launches during the fast-forward | 34 of 80 (43%) against the plain model |
+
+The model puts about 99% of its probability on one move, usually doing nothing, so its next-best
+moves are not meaningful candidates, and the value estimates of candidate moves differ by about
+0.02, which is too small to choose between them reliably. A search would need a value function
+trained to rank moves, not only to predict the final result.
+
 ## Submitting
 
 Their bot builds the `Dockerfile` at the root of a repository, so the entry goes in a repo of its
