@@ -30,7 +30,7 @@ planetwars/
     selfcheck.py   play the official sample agents in the official Python engine
     core/ agents/ client_server/   vendored from planet-wars-rts (MIT, see LICENSE-planet-wars-rts)
   tests/           parity tests against the official engine
-  tools/           record_game.py (render a game as an MP4), remote_match.py, TraceGame.kt + render_trace.py (our entry vs TeamTitansAgentV3 as an MP4)
+  tools/           record_game.py (render a game as an MP4), remote_match.py, TraceGame.kt + render_trace.py + aura.py (our entry vs TeamTitansAgentV3 as an MP4, Auralux-style with sound)
   media/           recorded games: against their greedy agent, and two against TeamTitansAgentV3
 ```
 
@@ -160,7 +160,10 @@ The current entry (planner with the learned value) against TeamTitansAgentV3, th
 and [as Player 2 (orange), a win at tick 969 on a 24-planet map](media/game_vs_titans_2.mp4). Titans only runs on the JVM, so
 `tools/TraceGame.kt` (drop it in `app/src/main/kotlin/games/planetwars/runners/` of their repo) plays the game there against the
 entry's server and writes the map and every launch; `python tools/render_trace.py trace.jsonl --out game.mp4` replays that in the
-JAX rules, which match the official engine tick for tick (it checks the final ship counts), and draws it.
+JAX rules, which match the official engine tick for tick (it checks the final ship counts), and draws it: glowing orbs with a dot
+orbiting for each ship, swarming fleets and ripples as in Auralux, with a synthesized ambient pad, a pluck for each launch, a thump
+for each hit and a chime when a planet changes hands (`--style classic` for the plain silent version). The two videos in `media/`
+are the plain ones; the Auralux-style versions are about 5 and 10 MB and are kept with the project files, not in git.
 
 ## Checks
 
