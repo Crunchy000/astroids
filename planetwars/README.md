@@ -115,8 +115,8 @@ no-ops, so the deeper model plays exactly like the original.
 
 `entry/search.py` puts a short search on top of the model: candidate moves are played on a copy of the
 game with the official rules, both sides then follow a cheap scripted player for 40 to 50 ticks, and
-the model's value estimate scores the result. It runs with `PW_SEARCH=1` (see `serve_port` style
-launch in the notes) and is off by default. It did not make the agent stronger:
+the model's value estimate scores the result. `SearchAgent` is not wired into `main.py`; to try it,
+serve `SearchAgent()` there instead of `NeuralAgent()`. It did not make the agent stronger:
 
 | Version | Result |
 |---|---|
