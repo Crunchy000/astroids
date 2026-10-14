@@ -75,3 +75,87 @@ def test_entry_serves_the_planner_unless_told_otherwise(monkeypatch):
     assert isinstance(main.make_agent(), planner.PlannerAgent)
     monkeypatch.setenv("PW_AGENT", "neural")
     assert type(main.make_agent()) is entry_agent.NeuralAgent
+
+
+def _numpy_view(s):
+    """The JAX state, trimmed to its real planets, as the entry's numpy code sees it."""
+    import types
+    n = int(np.asarray(s.valid).sum())
+    assert np.asarray(s.valid)[:n].all()
+    d = {k: np.asarray(v) for k, v in s._asdict().items()}
+    for k in ("valid", "owner", "ships", "pos", "growth", "radius", "tr_on", "tr_owner", "tr_dest", "tr_ships", "tr_pos", "tr_vel"):
+        d[k] = d[k][:n]
+    d["ships"], d["growth"], d["radius"] = (d[k].astype(np.float64) for k in ("ships", "growth", "radius"))
+    d["tr_ships"], d["pos"], d["tr_pos"] = (d[k].astype(np.float64) for k in ("tr_ships", "pos", "tr_pos"))
+    d["speed"], d["tick"], d["max_ticks"] = float(d["speed"]), int(d["tick"]), int(d["max_ticks"])
+    return types.SimpleNamespace(**d)
+
+
+def test_jax_planner_scores_like_the_numpy_one():
+    import jax
+    import jax.numpy as jnp
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+    from pwjax import env, maps, policy
+    from pwjax import planner as jplanner
+
+    plan = jax.jit(jplanner.make_planner(sources=32, horizon=90, top=4))
+    params = policy.init(jax.random.PRNGKey(0))
+    checked = 0
+    for seed in range(3):
+        bank = {k: jnp.asarray(v) for k, v in maps.make_bank(1, seed=seed, param_fn=maps.cog2026_params).items()}
+        s = env.from_bank(bank, 0)
+        key = jax.random.PRNGKey(seed + 7)
+        for t in range(200):
+            key, k1, k2 = jax.random.split(key, 3)
+            if t % 20 == 10:
+                for me in (1, 2):
+                    ns = _numpy_view(s)
+                    horizon = max(1, min(90, int(ns.max_ticks - ns.tick)))
+                    out = plan(s, me, horizon)
+                    n = ns.ships.shape[0]
+                    a1, a2 = planner.arrivals(ns, horizon)
+                    d = np.sqrt(((ns.pos[:, None, :] - ns.pos[None, :, :]) ** 2).sum(-1))
+                    near = (d <= 160.0) & ~np.eye(n, dtype=bool)
+                    bo, bs = planner.run(ns.owner.copy(), ns.ships.copy(), ns.growth, a1, a2)
+                    np.testing.assert_allclose(float(out["base"]), planner.score(bo[None], bs[None], ns, me, near)[0], rtol=1e-4, atol=1e-2)
+                    np.testing.assert_array_equal(np.asarray(out["base_owner"])[:n], bo)
+                    want = planner.plan(ns, me, horizon)
+                    src, dst, ships = (np.asarray(x) for x in out["action"])
+                    if (want is None) != (src < 0):  # only where launching gains nothing (a tie, within float32 noise)
+                        assert abs(float(out["best"]) - float(out["base"])) < 0.05
+                        continue
+                    if want is None:
+                        continue
+                    # same best score, even where two moves tie
+                    def value(i, j, c):
+                        ao, ash = planner.project(ns, me, horizon, np.array([i]), np.array([j]), np.array([c], float), a1, a2, bo, bs, d)
+                        return planner.score(ao, ash, ns, me, near)[0]
+                    np.testing.assert_allclose(value(int(src), int(dst), float(ships)), value(*want), rtol=1e-4, atol=1e-2)
+                    np.testing.assert_allclose(float(out["best"]), value(*want), rtol=1e-4, atol=1e-2)
+                    checked += 1
+            s = env.step(s, policy.sample_t(params, 4, s, 1, k1, 1.0, 0.5), policy.sample_t(params, 4, s, 2, k2, 1.0, 0.5))
+    assert checked >= 8
+
+
+def test_value_agent_with_the_hand_score_alone_plays_the_planner_move():
+    import jax
+    import jax.numpy as jnp
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+    from pwjax import env, lvalue, maps, policy
+
+    params = policy.init(jax.random.PRNGKey(0))
+    hand = jax.jit(lvalue.make_hand_agent(12, 90, 8))
+    val = jax.jit(lvalue.make_value_agent(params, 4, 12, 90, 8, mix=1.0, scale=1e4))
+    bank = {k: jnp.asarray(v) for k, v in maps.make_bank(1, seed=3, param_fn=maps.cog2026_params).items()}
+    s = env.from_bank(bank, 0)
+    key = jax.random.PRNGKey(5)
+    same = total = 0
+    for t in range(120):
+        key, k1, k2 = jax.random.split(key, 3)
+        if t % 10 == 5:
+            for me in (1, 2):
+                a, b = hand(s, me, k1), val(s, me, k1)
+                total += 1
+                same += int(all(np.allclose(np.asarray(x), np.asarray(y)) for x, y in zip(a, b)))
+        s = env.step(s, policy.sample_t(params, 4, s, 1, k1, 1.0, 0.5), policy.sample_t(params, 4, s, 2, k2, 1.0, 0.5))
+    assert total >= 20 and same >= total - 2
