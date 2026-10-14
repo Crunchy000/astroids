@@ -129,6 +129,10 @@ JAX, 1,024 games against itself re-ranking fewer (score counts a draw as half):
 | 24 launches | 16 | 0.667 |
 | 32 launches | 16 | 0.702 |
 
+A fourth round of self-play (16,000 games with 16 launches re-ranked, round 3 and round 2 as the opponents, training
+continued from round 3) did not improve on round 3: head to head at 16 launches it won 485 of 1,024 games (a score of
+0.474), so the entry keeps the round 3 network. The gain from here came from looking at more launches, not from more rounds.
+
 The entry now re-ranks up to 32 launches. Time is the limit (about 1.5 ms per launch on one CPU core), so it works
 through them in chunks of 8, best hand score first, and stops when 90 ms are spent, then picks the best seen so far.
 Against TeamTitansAgentV3 in the Kotlin runner: 32 of 32 games, 0 timeouts at 200 ms, 21 ms a move on average.
