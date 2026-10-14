@@ -1,8 +1,10 @@
 # Planet Wars RTS entry, trained with JAX
 
-An entry for Simon Lucas's [Planet Wars RTS](https://simonlucas.github.io/planet-wars-rts/) league,
-trained by self-play on a GPU. The game itself is untouched: we port its rules to JAX so thousands of
-games run in parallel, then ship a numpy copy of the network in their Python entry format.
+An entry for Simon Lucas's [Planet Wars RTS](https://simonlucas.github.io/planet-wars-rts/) league.
+The entry served by default is an all-moves planner (`entry/planner.py`, no training). A neural network
+trained by self-play on a GPU is also in the repo (`PW_AGENT=neural`); the planner beats it in 57 of 60
+games. The game itself is untouched: we port its rules to JAX so thousands of games run in parallel,
+then ship a numpy copy of the network in their Python entry format.
 
 ```
 planetwars/
@@ -15,7 +17,8 @@ planetwars/
     evaluate.py    win rates against the sample agents or another model
   entry/           the competition entry (copy to the root of a repo to submit)
     Dockerfile     their Python template: python:3.11-slim, port 8080
-    main.py        GameServerAgent(host="0.0.0.0", port=8080, agent=NeuralAgent())
+    main.py        GameServerAgent(host="0.0.0.0", port=8080, agent=PlannerAgent()); PW_AGENT=neural serves the network
+    planner.py     the all-moves planner (numpy only), the default agent
     agent.py       the neural agent (numpy only)
     pwnet.py       features + network, shared verbatim with training (numpy or jax.numpy)
     model.npz      trained weights (self-play iteration 450)
@@ -27,6 +30,49 @@ planetwars/
 ```
 
 ## How the agent works
+
+### The planner (default)
+
+Each tick it tries every launch the rules allow: every free planet of ours, every other planet as the
+target, and a quarter, half or all of the source's ships. Each is projected 90 ticks ahead with nobody
+launching anything else, and scored by where the game stands then: ship difference on planets, ten times
+the growth difference, half the difference in ships after another 20 ticks of growth, five per planet of
+lead, a small penalty for planets with no friendly planet within 160, and a huge value for winning or
+losing outright. The best move is played, or nothing if no launch beats waiting.
+
+With no new launches, a planet's future depends only on the fleets already heading for it, and a launch
+changes just two planets, the source (now smaller) and the target (one more arrival). So all of the
+roughly 1,000 moves are projected at once as arrays, about 5 ms a move on a 30-planet map, against the
+200 ms limit. `tests/test_planner.py` checks the projection against the official engine tick for tick.
+
+It came out of studying eight games against TeamTitansAgentV3 (league rank 19): the opening was level,
+but from about tick 100 it captured more enemy planets (26 a game to our network's 20) with bigger
+fleets, and moved about 2,750 ships between its own planets to the network's 230. Its public code tries
+every launch and projects each one ahead, which is the idea here. The projection, the scoring and the
+code are our own; the scoring terms follow what its code scores.
+
+Local results on league-style maps, both sides (the trained network's score in brackets):
+
+| Opponent | Planner wins | Network (iteration 450) |
+|---|---:|---:|
+| The network, iteration 450 | 57 / 60 | |
+| TeamTitansAgentV3 (league #19) | 21 / 32, then 9 / 16 in the Docker image | 1 / 72 |
+| sebba14-v2 (#25) | 32 / 36 | 10 / 36 |
+| genetic_v1 (#36) | 18 / 20 | 53 / 80 |
+| GalacticArmada (#34) | 20 / 20 | 74 / 80 |
+| AggressiveGreedy | 20 / 20 | 60 / 80 |
+| BetterGreedy, CarefulGreedy | 20 / 20 each | 80 / 80 each |
+| Their greedy agent | 60 / 60 | 99 / 100 |
+| Their careful random, better random, SimpleEvoAgent | 16 / 16 each in the Docker image | 100 / 100 each |
+
+Samples are small (about plus or minus 8 points) and games shared four CPU cores. Average move 4 to 7 ms,
+slowest seen 58 ms, no timeouts at 200 ms.
+
+Tuning, planner against planner over 40 games each: a 90-tick horizon beat 50 (68%), 130 (65%) and 110
+(60%) and tied 70; fleet sizes of a quarter, half and all matched finer or larger sets (50% and 48%);
+adding the network's own move as a candidate did worse (45%).
+
+### The neural network
 
 Each tick the network looks at every planet (owner, ships, growth, position, fleets in flight and
 fleets heading to it) through a small transformer, then scores every legal (source, destination)
@@ -66,7 +112,7 @@ Record another with `python tools/record_game.py --seed 7 --out game.mp4`.
 cd planetwars
 python -m pytest -q tests          # JAX rules == official Python engine; numpy entry == JAX policy
 python -m pwjax.evaluate entry/model.npz --games 256 --vs greedy,random
-cd entry && python selfcheck.py    # official engine, submission-check settings
+cd entry && python selfcheck.py    # official engine, submission-check settings (--agent neural for the network)
 ```
 
 The parity tests replay fuzzed games (legal and illegal actions) in both engines and compare every

@@ -67,3 +67,11 @@ def test_planner_returns_a_legal_move_or_waits():
     a = agent.get_action(gs)
     assert a.source_planet_id < 0 or (gs.planets[a.source_planet_id].owner == Player.Player1
                                       and 0 < a.num_ships <= gs.planets[a.source_planet_id].n_ships)
+
+
+def test_entry_serves_the_planner_unless_told_otherwise(monkeypatch):
+    import main
+    monkeypatch.delenv("PW_AGENT", raising=False)
+    assert isinstance(main.make_agent(), planner.PlannerAgent)
+    monkeypatch.setenv("PW_AGENT", "neural")
+    assert type(main.make_agent()) is entry_agent.NeuralAgent

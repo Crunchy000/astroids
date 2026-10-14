@@ -8,6 +8,7 @@ import random
 import time
 
 from agent import NeuralAgent
+from planner import PlannerAgent
 from agents.greedy_heuristic_agent import GreedyHeuristicAgent
 from agents.random_agents import CarefulRandomAgent
 from core.forward_model import ForwardModel
@@ -37,6 +38,7 @@ def main():
     ap.add_argument("--planets", type=int, default=20)
     ap.add_argument("--ticks", type=int, default=1000)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--agent", choices=["planner", "neural"], default="planner", help="which agent main.py serves by default")
     args = ap.parse_args()
     random.seed(args.seed)
     params = GameParams(num_planets=args.planets, max_ticks=args.ticks)
@@ -45,7 +47,7 @@ def main():
         worst = 0.0
         for g in range(args.games):
             for side in (1, 2):
-                won, w = play(NeuralAgent(), cls(), params, side)
+                won, w = play(PlannerAgent() if args.agent == "planner" else NeuralAgent(), cls(), params, side)
                 wins += won
                 worst = max(worst, w)
                 games += 1
