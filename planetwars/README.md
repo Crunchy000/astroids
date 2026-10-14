@@ -129,6 +129,49 @@ moves are not meaningful candidates, and the value estimates of candidate moves 
 0.02, which is too small to choose between them reliably. A search would need a value function
 trained to rank moves, not only to predict the final result.
 
+### A value function trained on game results (did not help)
+
+The AlphaZero-style test of that last sentence: train a value network on who won, then use it to pick
+moves.
+
+`python -m pwjax.vtrain` plays batches of 2048 games on the GPU between a mix of players (iterations 325,
+450 and 550, an early snapshot and the behaviour-cloned starter, each at temperature 0.7 to 1.5 and with up to 6% random moves, plus
+the greedy, rush and careful-random bots), records a position every 16 ticks, labels each with the
+result, and regresses a copy of the network onto those labels. 51 batches (about 100,000 games, 6
+million positions, about 30 minutes on an A100) were enough; the held-out error stopped improving after
+about 10. On 1024 held-out games, squared error against the result (lower is better; the others are
+rescaled to fit, which flatters them):
+
+| Predictor | Error | Right side of a decided game | Error by game phase (0-10%, 10-25%, 25-50%, 50%+) |
+|---|---|---|---|
+| New value network | 0.385 | 85.3% | 0.68, 0.37, 0.25, 0.33 |
+| Iteration 450's own value output | 0.473 | 82.3% | 0.83, 0.48, 0.32, 0.37 |
+| Ship share | 0.642 | 81.1% | 0.92, 0.68, 0.52, 0.53 |
+
+So it predicts the result better than the old output, mostly in the middle game. It does not choose
+better moves. `python -m pwjax.qprobe` takes 896 positions from the same kind of games, tries each of
+`vsearch.candidates` (the policy's move, doing nothing, the best-aimed launch from each of its top 6
+planets, greedy's move; about 3.6 of the 9 are distinct), and finishes the game 12 times from each,
+both sides sampling the policy, to measure what each move is worth. Results on a scale where a win is
++1 and a loss is -1:
+
+| | Gain over the policy's own move |
+|---|---|
+| Best candidate, picked on half the rollouts and scored on the other half | +0.027 ± 0.012 (384 positions), +0.009 ± 0.011 (512 positions) |
+| Look-ahead scored by the new value network (1, 5, 10, 20 or 40 ticks, greedy or idle fast-forward) | between -0.009 and +0.011, every one within about one standard error of zero |
+| The same with iteration 450's own value output | between -0.009 and +0.006 |
+
+The candidates' worth differs by only 0.07 (standard deviation) in a typical position, and a look-ahead
+score ranks them with a rank correlation of 0.23 to 0.28 for both value functions. Picking the best of these
+moves from six rollouts gains 0.01 to 0.03 per decision, which is half a point to a point and a half of
+win rate, and head-to-head play with the search on the early value network gave 118 wins and 138
+losses against the plain model over 256 games (46%).
+The gap to the best agents is therefore not in single-move choice, and a better value function alone
+will not close it.
+
+`python -m pwjax.vsearch` is the same search as a JAX agent for head-to-head games. The trained value
+network is kept outside the repo, since nothing uses it.
+
 ## Submitting
 
 Their bot builds the `Dockerfile` at the root of a repository, so the entry goes in a repo of its

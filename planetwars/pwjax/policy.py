@@ -57,6 +57,26 @@ def sample(params, heads, s, me, key, greedy=False):
     return (src, dst, ships), idx, aidx, logp, value, aux["potential"]
 
 
+def sample_t(params, heads, s, me, key, temp, eps):
+    """Sample an action with the logits divided by `temp`; with probability `eps` play a uniformly random legal move.
+
+    Used to make the games a value function learns from more varied than the policy's own play.
+    """
+    flat, amount_logits, _, aux = apply(params, heads, s, me)
+    k1, k2, k3 = jax.random.split(key, 3)
+    n = amount_logits.shape[0]
+    rand = jax.random.uniform(k3) < eps
+    logits = jnp.where(rand, jnp.where(flat > -1e8, 0.0, flat), flat / temp)
+    idx = jax.random.categorical(k1, logits)
+    al = _amount_dist(amount_logits, idx)
+    aidx = jax.random.categorical(k2, jnp.where(rand, jnp.zeros_like(al), al / temp))
+    noop = idx >= n * n
+    src = jnp.where(noop, -1, idx // n).astype(jnp.int32)
+    dst = jnp.where(noop, -1, idx % n).astype(jnp.int32)
+    ships = jnp.where(noop, 0.0, aux["amounts"].reshape(n * n, -1)[jnp.clip(idx, 0, n * n - 1), aidx])
+    return src, dst, ships
+
+
 def evaluate(params, heads, s, me, idx, aidx):
     """Log-probability, entropy and value of a taken action (for the PPO update)."""
     flat, amount_logits, value, _ = apply(params, heads, s, me)
