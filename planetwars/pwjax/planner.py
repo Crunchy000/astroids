@@ -90,12 +90,12 @@ def make_planner(sources=12, horizon=90, top=8, fractions=FRACTIONS):
     Keys: action (src, dst, ships), best, base (scores of the best move and of waiting), cand_src/dst/ships/score [top],
     cand_owner/cand_ships [top, N] (projected positions), base_owner/base_ships [N].
     """
-    fr = jnp.asarray(fractions)
-    nf = fr.shape[0]
+    nf = len(fractions)
 
     def plan(s: env.State, me, h_eff):
         n = s.ships.shape[0]
         dt = s.ships.dtype
+        fr = jnp.asarray(fractions, dt)
         d = jnp.sqrt(jnp.sum((s.pos[:, None, :] - s.pos[None, :, :]) ** 2, axis=-1))
         near = near_matrix(s)
         free = s.valid & (s.owner == me) & ~s.tr_on & (s.ships >= 1.0)

@@ -104,8 +104,8 @@ def n_layers(params) -> int:
     return sum(1 for k in params if k.endswith(".wq"))
 
 
-def forward(xp, params, heads, planet, glob, pair, valid, pair_ok):
-    """Return (flat logits [N*N + 1] (last = do nothing), amount logits [N, N, N_AMOUNTS], value)."""
+def trunk(xp, params, heads, planet, glob, valid):
+    """The transformer shared by every output: returns (token states [N, d_model], hidden global vector g)."""
     p = params
     n = planet.shape[0]
     tok = xp.concatenate([planet, xp.broadcast_to(glob[None, :], (n, glob.shape[0]))], axis=-1)
@@ -130,6 +130,20 @@ def forward(xp, params, heads, planet, glob, pair, valid, pair_ok):
     vf = valid.astype(h.dtype)[:, None]
     pooled = xp.sum(h * vf, axis=0) / xp.maximum(xp.sum(vf), 1.0)
     g = _relu(xp, xp.concatenate([pooled, glob]) @ p["g.w"] + p["g.b"])
+    return h, g
+
+
+def value_only(xp, params, heads, planet, glob, valid):
+    """Just the value output (skips the move heads): the cost of ranking a position."""
+    _, g = trunk(xp, params, heads, planet, glob, valid)
+    return (_relu(xp, g @ params["v1.w"] + params["v1.b"]) @ params["v2.w"] + params["v2.b"])[0]
+
+
+def forward(xp, params, heads, planet, glob, pair, valid, pair_ok):
+    """Return (flat logits [N*N + 1] (last = do nothing), amount logits [N, N, N_AMOUNTS], value)."""
+    p = params
+    n = planet.shape[0]
+    h, g = trunk(xp, params, heads, planet, glob, valid)
     value = (_relu(xp, g @ p["v1.w"] + p["v1.b"]) @ p["v2.w"] + p["v2.b"])[0]
     noop = (_relu(xp, g @ p["n1.w"] + p["n1.b"]) @ p["n2.w"] + p["n2.b"])
     hp = (h @ p["ps.w"])[:, None, :] + (h @ p["pd.w"])[None, :, :] + pair @ p["pp.w"] + p["pp.b"] + (g @ p["pg.w"])

@@ -1,4 +1,5 @@
 """A planner that tries every launch: project each one forward with nobody else acting, keep the best.
+(With a value network on disk, the best few by this score are re-ranked by it; see `plan_ranked`.)
 
 Each tick every (source, target, amount) the rules allow is scored by where the game stands `HORIZON` ticks
 later if nothing else is launched by either side. With no new launches, every planet's future depends only on
@@ -13,14 +14,20 @@ a small penalty for planets with no friendly planet nearby, and a huge value for
 import os
 import time
 
+from types import SimpleNamespace
+
 import numpy as np
 
+import pwnet
 from agent import OWNER, NeuralAgent, arrays, load, choose
 from core.game_state import Action, Player
 
 HORIZON = int(os.environ.get("PW_HORIZON", "90"))
 AMOUNTS = os.environ.get("PW_AMOUNTS", "0.25,0.5,1.0")
 FRACTIONS = tuple(float(x) for x in AMOUNTS.split(","))
+TOP = int(os.environ.get("PW_TOP", "8"))        # launches the value network re-ranks
+MIX = float(os.environ.get("PW_MIX", "0.5"))    # weight of the hand score against the value network's
+VALUE = os.environ.get("PW_VALUE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "value.npz"))
 USE_POLICY = os.environ.get("PW_POLICY_CANDIDATE", "0") == "1"  # also try the neural policy's own move
 
 
@@ -104,8 +111,12 @@ def project(s, me, horizon, ci, cj, cn, a1, a2, base_owner, base_ships, d):
     return all_owner, all_ships
 
 
-def plan(s, me, horizon=HORIZON, fractions=FRACTIONS, extra=None):
-    """Best launch as (src, dst, ships), or None to wait. `extra`: more (src, dst, ships) moves to consider."""
+def candidates(s, me, horizon=HORIZON, fractions=FRACTIONS, extra=None):
+    """Every launch the rules allow and where it leaves the map `horizon` ticks on, with the hand score of that.
+
+    Returns None when there is nothing to launch from, else a dict: ci, cj, cn (source, target, ships), owner and
+    ships ([C, n] after the horizon), score ([C]), and the same for waiting: base_owner, base_ships, base.
+    """
     n = s.ships.shape[0]
     horizon = max(1, min(horizon, int(s.max_ticks - s.tick)))
     a1, a2 = arrivals(s, horizon)
@@ -133,19 +144,61 @@ def plan(s, me, horizon=HORIZON, fractions=FRACTIONS, extra=None):
         return None
     ci, cj, cn = np.concatenate(ci), np.concatenate(cj), np.concatenate(cn)
     all_owner, all_ships = project(s, me, horizon, ci, cj, cn, a1, a2, base_owner, base_ships, d)
-    sc = score(all_owner, all_ships, s, me, near)
-    best = int(np.argmax(sc))
-    if sc[best] > base:
-        return int(ci[best]), int(cj[best]), float(cn[best])
+    return dict(ci=ci, cj=cj, cn=cn, owner=all_owner, ships=all_ships, score=score(all_owner, all_ships, s, me, near),
+                base_owner=base_owner, base_ships=base_ships, base=base, horizon=horizon)
+
+
+def plan(s, me, horizon=HORIZON, fractions=FRACTIONS, extra=None):
+    """Best launch as (src, dst, ships), or None to wait. `extra`: more (src, dst, ships) moves to consider."""
+    c = candidates(s, me, horizon, fractions, extra)
+    if c is None:
+        return None
+    best = int(np.argmax(c["score"]))
+    if c["score"][best] > c["base"]:
+        return int(c["ci"][best]), int(c["cj"][best]), float(c["cn"][best])
     return None
+
+
+def value_of(params, heads, s, me, owner, ships, tick):
+    """The value network's view (a number in about [-1, 1]) of a position with no fleets in flight."""
+    s2 = SimpleNamespace(**{**vars(s), "owner": owner, "ships": ships, "tr_on": np.zeros_like(s.tr_on), "tick": float(tick)})
+    planet, glob, _, _ = pwnet.features(np, s2, me)
+    return float(pwnet.value_only(np, params, heads, planet, glob, s2.valid))
+
+
+def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=TOP, mix=MIX):
+    """Like `plan`, but the `top` launches by hand score (and waiting) are re-ranked by the value network, mixed with
+    the hand score as (1 - mix) * value + mix * tanh(hand / 200). Returns (src, dst, ships) or None to wait."""
+    c = candidates(s, me, horizon, fractions)
+    if c is None:
+        return None
+    order = np.argsort(-c["score"], kind="stable")[:top]
+    tick = s.tick + c["horizon"]
+    owners = [c["owner"][k] for k in order] + [c["base_owner"]]
+    shipss = [c["ships"][k] for k in order] + [c["base_ships"]]
+    hand = np.concatenate([c["score"][order], [c["base"]]])
+    total = np.empty(len(owners))
+    for k, (o, sh) in enumerate(zip(owners, shipss)):
+        v = value_of(params, heads, s, me, o, sh, tick)
+        won, lost = not (o == 3 - me).any(), not (o == me).any()
+        total[k] = ((1.0 - mix) * v + mix * np.tanh(hand[k] / 200.0)
+                    + (10.0 if won and not lost else 0.0) - (10.0 if lost and not won else 0.0))
+    k = int(np.argmax(total))
+    if k == len(order):
+        return None
+    j = order[k]
+    return int(c["ci"][j]), int(c["cj"][j]), float(c["cn"][j])
 
 
 class PlannerAgent(NeuralAgent):
     """Tries every launch each tick (see the module docstring)."""
 
-    def __init__(self, horizon=HORIZON, fractions=FRACTIONS, use_policy=USE_POLICY):
+    def __init__(self, horizon=HORIZON, fractions=FRACTIONS, use_policy=USE_POLICY, value=VALUE, top=TOP, mix=MIX):
         super().__init__()
         self.horizon, self.fractions, self.use_policy = horizon, tuple(fractions), use_policy
+        self.value, self.top, self.mix = None, top, mix
+        if value and value != "off" and os.path.exists(value):
+            self.value = load(value)  # (params, heads): ranks the planner's best launches
 
     def get_action(self, game_state):
         try:
@@ -158,7 +211,14 @@ class PlannerAgent(NeuralAgent):
                 params, heads = load()
                 i, j, a = choose(params, heads, s, me)
                 extra = [(i, j, a)] if i >= 0 else None
-            best = plan(s, me, self.horizon, self.fractions, extra=extra)
+            if self.value is not None and extra is None:
+                try:
+                    best = plan_ranked(s, me, *self.value, self.horizon, self.fractions, self.top, self.mix)
+                except Exception as e:  # fall back to the hand-written score
+                    print("PlannerAgent value error:", repr(e), flush=True)
+                    best = plan(s, me, self.horizon, self.fractions)
+            else:
+                best = plan(s, me, self.horizon, self.fractions, extra=extra)
             if best is None:
                 return Action.do_nothing()
             src, dst, ships = best

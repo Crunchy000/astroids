@@ -1,7 +1,9 @@
 # Planet Wars RTS entry, trained with JAX
 
 An entry for Simon Lucas's [Planet Wars RTS](https://simonlucas.github.io/planet-wars-rts/) league.
-The entry served by default is an all-moves planner (`entry/planner.py`, no training). A neural network
+The entry served by default is an all-moves planner (`entry/planner.py`) whose best few launches are
+re-ranked by a small network trained on the results of planner games (`entry/value.npz`). Without that
+file, or with `PW_VALUE=off`, it ranks launches by a hand-written score alone. A neural network
 trained by self-play on a GPU is also in the repo (`PW_AGENT=neural`); the planner beats it in 57 of 60
 games. The game itself is untouched: we port its rules to JAX so thousands of games run in parallel,
 then ship a numpy copy of the network in their Python entry format.
@@ -15,10 +17,13 @@ planetwars/
     policy.py      sampling and log-probabilities for PPO
     ppo.py         self-play PPO against itself, older snapshots and the sample agents
     evaluate.py    win rates against the sample agents or another model
+    planner.py     the planner in JAX (checked against entry/planner.py)
+    lvalue.py      planner games, value training and head-to-head tests for the learned value
   entry/           the competition entry (copy to the root of a repo to submit)
     Dockerfile     their Python template: python:3.11-slim, port 8080
     main.py        GameServerAgent(host="0.0.0.0", port=8080, agent=PlannerAgent()); PW_AGENT=neural serves the network
     planner.py     the all-moves planner (numpy only), the default agent
+    value.npz      value network that re-ranks the planner's best launches (trained on planner games)
     agent.py       the neural agent (numpy only)
     pwnet.py       features + network, shared verbatim with training (numpy or jax.numpy)
     model.npz      trained weights (self-play iteration 450)
@@ -71,6 +76,45 @@ slowest seen 58 ms, no timeouts at 200 ms.
 Tuning, planner against planner over 40 games each: a 90-tick horizon beat 50 (68%), 130 (65%) and 110
 (60%) and tied 70; fleet sizes of a quarter, half and all matched finer or larger sets (50% and 48%);
 adding the network's own move as a candidate did worse (45%).
+
+### The planner with a learned value (default)
+
+The hand-written score is the weak point of the planner, so a network now helps rank launches. Each tick
+the planner still projects every launch, but only its best eight by hand score (and waiting) go on:
+the projected position of each is shown to a value network, and the launch with the best
+`0.5 * network + 0.5 * tanh(hand score / 200)` is played. The network is the same transformer as the
+policy (3 layers, 128 wide), and only its value output is used. It sees the projected position, with no
+fleets in flight and the clock moved on to the tick the projection ends at, and predicts who ends up
+with more ships on planets (+1 win, -1 loss).
+
+It was trained on planner games, not on the policy's: 32,000 games on random league maps, each side with
+its own look-ahead (60 to 100 ticks), some random launches, and one side in ten playing their greedy agent. Every 8 ticks the
+position each side's chosen launch leads to was recorded, labelled with the game's result: 8 million
+positions, in about ten minutes on one A100 (`python -m pwjax.lvalue gen`, then `train`). With only 8,000 games
+the network memorised them (held-out error rose while training error fell), so the data matters more than
+the network size. On held-out games its error is 0.384 against 0.410 for the hand score rescaled to fit
+the results as well as it can be, and it picks the winner 85.2% of the time (hand score 84.4%).
+
+The gain shows up in play, not in the error. Head to head in JAX (`python -m pwjax.lvalue match`), 512 league
+maps, both sides, 1,024 games, value planner against the hand-scored planner:
+
+| Opponent | Value planner wins | Hand-scored planner wins |
+|---|---:|---:|
+| The hand-scored planner | 874 / 1,024 (85%) | |
+| TeamTitansAgentV3 (league #19), real engine, 200 ms | 31 / 32 | 24 / 32 |
+| Their greedy agent | 1,008 / 1,024 | 994 / 1,024 |
+| Their rush bot | 1,012 / 1,024 | 1,016 / 1,024 |
+| The trained network, iteration 450 | 948 / 1,024 | 922 / 1,024 |
+
+The first row is the mixed network-and-score choice; the network alone wins 876. The Titans games ran in the Kotlin
+runner against the entry's Python server. The value planner averaged 17 ms a move (35 ms on a 30-planet map in a
+separate timing run, slowest 78 ms) and had no timeouts at 200 ms. `PW_TOP`, `PW_MIX` and `PW_VALUE` change the
+number of launches re-ranked, the mix and the weights file. `tests/test_planner.py` checks the JAX planner against the numpy one, and
+the numpy value ranking against the JAX one.
+
+The earlier value network in "A value function trained on game results (did not help)" below was asked a
+different question, which of the policy's own moves is worth most, and the policy's moves were not where
+the gap was.
 
 ### The neural network
 
