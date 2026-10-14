@@ -30,8 +30,8 @@ planetwars/
     selfcheck.py   play the official sample agents in the official Python engine
     core/ agents/ client_server/   vendored from planet-wars-rts (MIT, see LICENSE-planet-wars-rts)
   tests/           parity tests against the official engine
-  tools/           record_game.py (render a game as an MP4), remote_match.py
-  media/           a recorded game against their greedy agent
+  tools/           record_game.py (render a game as an MP4), remote_match.py, TraceGame.kt + render_trace.py (our entry vs TeamTitansAgentV3 as an MP4)
+  media/           recorded games: against their greedy agent, and two against TeamTitansAgentV3
 ```
 
 ## How the agent works
@@ -154,6 +154,13 @@ games against their sample agents, with no timeouts and a 9 ms average move.
 
 [Watch the whole game](media/game_vs_greedy.mp4): our model wins on a 30-planet league map at tick 722.
 Record another with `python tools/record_game.py --seed 7 --out game.mp4`.
+
+The current entry (planner with the learned value) against TeamTitansAgentV3, the first two games recorded
+(the other two recorded were wins as well): [as Player 1 (blue), a win by wiping out Titans at tick 480 on a 16-planet map](media/game_vs_titans_1.mp4)
+and [as Player 2 (orange), a win at tick 969 on a 24-planet map](media/game_vs_titans_2.mp4). Titans only runs on the JVM, so
+`tools/TraceGame.kt` (drop it in `app/src/main/kotlin/games/planetwars/runners/` of their repo) plays the game there against the
+entry's server and writes the map and every launch; `python tools/render_trace.py trace.jsonl --out game.mp4` replays that in the
+JAX rules, which match the official engine tick for tick (it checks the final ship counts), and draws it.
 
 ## Checks
 
