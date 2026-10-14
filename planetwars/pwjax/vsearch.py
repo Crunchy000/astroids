@@ -51,10 +51,11 @@ def outcome(s, me):
     return jnp.where(lead == me, 1.0, jnp.where(lead == 0, 0.0, -1.0))
 
 
-def after(s, me, action, horizon, rollout="greedy"):
-    """Play `action` for `me` (the other side plays the greedy bot's move), then `horizon - 1` more ticks of
-    `rollout` (both sides greedy, or nobody does anything). Returns the position and whether the game is over."""
-    o0 = baselines.greedy(s, 3 - me)
+def after(s, me, action, horizon, rollout="greedy", idle_opponent=False):
+    """Play `action` for `me` (the other side plays the greedy bot's move, or nothing if `idle_opponent`), then
+    `horizon - 1` more ticks of `rollout` (both sides greedy, or nobody does anything). Returns the position
+    and whether the game is over."""
+    o0 = (jnp.int32(-1), jnp.int32(-1), jnp.zeros((), s.ships.dtype)) if idle_opponent else baselines.greedy(s, 3 - me)
     a1 = tuple(jnp.where(me == 1, x, y) for x, y in zip(action, o0))
     a2 = tuple(jnp.where(me == 2, x, y) for x, y in zip(action, o0))
     s1 = env.step(s, a1, a2)
@@ -70,6 +71,24 @@ def after(s, me, action, horizon, rollout="greedy"):
         return (st2, done | env.is_terminal(st2)), None
 
     return jax.lax.scan(body, (s1, env.is_terminal(s1)), None, length=horizon - 1)[0]
+
+
+def titans_score(s, me, width=640.0):
+    """TeamTitansAgentV3's position score (planets only, fleets in flight do not count): ship difference,
+    ten times the growth difference, half the difference in ships a further 20 ticks of growth would give,
+    five per planet of lead, a penalty for planets far from all friendly ones, and a huge win or loss."""
+    mine, opp = s.valid & (s.owner == me), s.valid & (s.owner == 3 - me)
+    f = lambda x, m: jnp.sum(jnp.where(m, x, 0.0))  # noqa: E731
+    score = f(s.ships, mine) - f(s.ships, opp)
+    score += 10.0 * (f(s.growth, mine) - f(s.growth, opp))
+    score += 0.5 * (f(s.ships + 20.0 * s.growth, mine) - f(s.ships + 20.0 * s.growth, opp))
+    d = jnp.sqrt(jnp.sum((s.pos[:, None, :] - s.pos[None, :, :]) ** 2, axis=-1))
+    n_mine, n_opp = jnp.sum(mine), jnp.sum(opp)
+    friend = mine[None, :] & ~jnp.eye(s.ships.shape[0], dtype=bool)
+    nearest = jnp.min(jnp.where(friend, d, 1e9), axis=1)
+    score -= jnp.where(n_mine > 1, f(2.0 * s.growth, mine & (nearest > width / 4.0)), 0.0)
+    score += 5.0 * (n_mine - n_opp)
+    return score + jnp.where((n_opp == 0) & (n_mine > 0), 10000.0, 0.0) - jnp.where((n_mine == 0) & (n_opp > 0), 10000.0, 0.0)
 
 
 def make_search(pol, heads, value=None, top=6, horizon=40, prior=0.02, rollout="greedy", v_heads=None):
