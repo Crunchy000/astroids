@@ -139,6 +139,35 @@ def value_only(xp, params, heads, planet, glob, valid):
     return (_relu(xp, g @ params["v1.w"] + params["v1.b"]) @ params["v2.w"] + params["v2.b"])[0]
 
 
+def value_batch(xp, params, heads, planet, glob, valid):
+    """`value_only` for B positions at once: planet [B, N, F], glob [B, G], valid [B, N] -> values [B]."""
+    p = params
+    b, n, _ = planet.shape
+    tok = xp.concatenate([planet, xp.broadcast_to(glob[:, None, :], (b, n, glob.shape[-1]))], axis=-1)
+    h = tok @ p["in.w"] + p["in.b"]
+    dm = h.shape[-1]
+    dh = dm // heads
+    kmask = valid[:, None, None, :]
+    for i in range(n_layers(p)):
+        a = _ln(xp, h, p[f"l{i}.ln1.g"], p[f"l{i}.ln1.b"])
+        q = (a @ p[f"l{i}.wq"]).reshape(b, n, heads, dh)
+        k = (a @ p[f"l{i}.wk"]).reshape(b, n, heads, dh)
+        v = (a @ p[f"l{i}.wv"]).reshape(b, n, heads, dh)
+        att = xp.einsum("bqhd,bkhd->bhqk", q, k) / (dh ** 0.5)
+        att = xp.where(kmask, att, NEG)
+        att = xp.exp(att - xp.max(att, axis=-1, keepdims=True))
+        att = att / xp.sum(att, axis=-1, keepdims=True)
+        o = xp.einsum("bhqk,bkhd->bqhd", att, v).reshape(b, n, dm)
+        h = h + o @ p[f"l{i}.wo"] + p[f"l{i}.bo"]
+        a = _ln(xp, h, p[f"l{i}.ln2.g"], p[f"l{i}.ln2.b"])
+        h = h + _relu(xp, a @ p[f"l{i}.w1"] + p[f"l{i}.b1"]) @ p[f"l{i}.w2"] + p[f"l{i}.b2"]
+    h = _ln(xp, h, p["out.ln.g"], p["out.ln.b"])
+    vf = valid.astype(h.dtype)[..., None]
+    pooled = xp.sum(h * vf, axis=1) / xp.maximum(xp.sum(vf, axis=1), 1.0)
+    g = _relu(xp, xp.concatenate([pooled, glob], axis=-1) @ p["g.w"] + p["g.b"])
+    return (_relu(xp, g @ p["v1.w"] + p["v1.b"]) @ p["v2.w"] + p["v2.b"])[..., 0]
+
+
 def forward(xp, params, heads, planet, glob, pair, valid, pair_ok):
     """Return (flat logits [N*N + 1] (last = do nothing), amount logits [N, N, N_AMOUNTS], value)."""
     p = params

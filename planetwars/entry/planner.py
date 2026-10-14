@@ -25,7 +25,9 @@ from core.game_state import Action, Player
 HORIZON = int(os.environ.get("PW_HORIZON", "90"))
 AMOUNTS = os.environ.get("PW_AMOUNTS", "0.25,0.5,1.0")
 FRACTIONS = tuple(float(x) for x in AMOUNTS.split(","))
-TOP = int(os.environ.get("PW_TOP", "8"))        # launches the value network re-ranks
+TOP = int(os.environ.get("PW_TOP", "32"))       # most launches the value network re-ranks (best hand score first)
+BUDGET_MS = float(os.environ.get("PW_BUDGET_MS", "90"))  # stop adding launches to re-rank past this many ms into a move
+CHUNK = 8                                       # launches per pass through the network
 MIX = float(os.environ.get("PW_MIX", "0.5"))    # weight of the hand score against the value network's
 VALUE = os.environ.get("PW_VALUE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "value.npz"))
 USE_POLICY = os.environ.get("PW_POLICY_CANDIDATE", "0") == "1"  # also try the neural policy's own move
@@ -161,44 +163,65 @@ def plan(s, me, horizon=HORIZON, fractions=FRACTIONS, extra=None):
 
 def value_of(params, heads, s, me, owner, ships, tick):
     """The value network's view (a number in about [-1, 1]) of a position with no fleets in flight."""
-    s2 = SimpleNamespace(**{**vars(s), "owner": owner, "ships": ships, "tr_on": np.zeros_like(s.tr_on), "tick": float(tick)})
-    planet, glob, _, _ = pwnet.features(np, s2, me)
-    return float(pwnet.value_only(np, params, heads, planet, glob, s2.valid))
+    return float(value_many(params, heads, s, me, [owner], [ships], tick)[0])
 
 
-def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=TOP, mix=MIX):
-    """Like `plan`, but the `top` launches by hand score (and waiting) are re-ranked by the value network, mixed with
-    the hand score as (1 - mix) * value + mix * tanh(hand / 200). Returns (src, dst, ships) or None to wait."""
+def value_many(params, heads, s, me, owners, shipss, tick):
+    """`value_of` for several positions of the same game at once (one batched pass through the network)."""
+    planets, globs = [], []
+    for o, sh in zip(owners, shipss):
+        s2 = SimpleNamespace(**{**vars(s), "owner": o, "ships": sh, "tr_on": np.zeros_like(s.tr_on), "tick": float(tick)})
+        planet, glob, _, _ = pwnet.features(np, s2, me)
+        planets.append(planet)
+        globs.append(glob)
+    dt = next(iter(params.values())).dtype
+    valid = np.broadcast_to(s.valid, (len(owners), s.valid.shape[0]))
+    return pwnet.value_batch(np, params, heads, np.stack(planets).astype(dt), np.stack(globs).astype(dt), valid)
+
+
+def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=TOP, mix=MIX, budget_ms=BUDGET_MS):
+    """Like `plan`, but the best launches by hand score (and waiting) are re-ranked by the value network, mixed with
+    the hand score as (1 - mix) * value + mix * tanh(hand / 200). Launches go through the network eight at a time,
+    best hand score first, until `top` have been seen or `budget_ms` (counted from the start of this call) would be
+    exceeded by another batch, so a slow machine looks at fewer. Returns (src, dst, ships) or None to wait."""
+    started = time.perf_counter()
     c = candidates(s, me, horizon, fractions)
     if c is None:
         return None
     order = np.argsort(-c["score"], kind="stable")[:top]
     tick = s.tick + c["horizon"]
-    owners = [c["owner"][k] for k in order] + [c["base_owner"]]
-    shipss = [c["ships"][k] for k in order] + [c["base_ships"]]
-    hand = np.concatenate([c["score"][order], [c["base"]]])
-    total = np.empty(len(owners))
-    for k, (o, sh) in enumerate(zip(owners, shipss)):
-        v = value_of(params, heads, s, me, o, sh, tick)
-        won, lost = not (o == 3 - me).any(), not (o == me).any()
-        total[k] = ((1.0 - mix) * v + mix * np.tanh(hand[k] / 200.0)
-                    + (10.0 if won and not lost else 0.0) - (10.0 if lost and not won else 0.0))
-    k = int(np.argmax(total))
-    if k == len(order):
+    best_total, best_k, took = -np.inf, None, 0.0
+    for lo in range(0, len(order), CHUNK):
+        if lo and (time.perf_counter() - started) * 1000 + took > budget_ms:
+            break
+        t0 = time.perf_counter()
+        idx = order[lo:lo + CHUNK]
+        owners = [c["owner"][k] for k in idx] + ([c["base_owner"]] if lo == 0 else [])
+        shipss = [c["ships"][k] for k in idx] + ([c["base_ships"]] if lo == 0 else [])
+        hand = np.concatenate([c["score"][idx], [c["base"]] if lo == 0 else []])
+        v = value_many(params, heads, s, me, owners, shipss, tick)
+        for k, o in enumerate(owners):
+            won, lost = not (o == 3 - me).any(), not (o == me).any()
+            total = ((1.0 - mix) * float(v[k]) + mix * np.tanh(hand[k] / 200.0)
+                     + (10.0 if won and not lost else 0.0) - (10.0 if lost and not won else 0.0))
+            if total > best_total:
+                best_total, best_k = total, (None if k == len(idx) else int(idx[k]))
+        took = max(took, (time.perf_counter() - t0) * 1000)
+    if best_k is None:
         return None
-    j = order[k]
-    return int(c["ci"][j]), int(c["cj"][j]), float(c["cn"][j])
+    return int(c["ci"][best_k]), int(c["cj"][best_k]), float(c["cn"][best_k])
 
 
 class PlannerAgent(NeuralAgent):
     """Tries every launch each tick (see the module docstring)."""
 
-    def __init__(self, horizon=HORIZON, fractions=FRACTIONS, use_policy=USE_POLICY, value=VALUE, top=TOP, mix=MIX):
+    def __init__(self, horizon=HORIZON, fractions=FRACTIONS, use_policy=USE_POLICY, value=VALUE, top=TOP, mix=MIX, budget_ms=BUDGET_MS):
         super().__init__()
         self.horizon, self.fractions, self.use_policy = horizon, tuple(fractions), use_policy
-        self.value, self.top, self.mix = None, top, mix
+        self.value, self.top, self.mix, self.budget_ms = None, top, mix, budget_ms
         if value and value != "off" and os.path.exists(value):
-            self.value = load(value)  # (params, heads): ranks the planner's best launches
+            params, heads = load(value)  # ranks the planner's best launches (single precision: twice as fast, same picks)
+            self.value = ({k: v.astype(np.float32) for k, v in params.items()}, heads)
 
     def get_action(self, game_state):
         try:
@@ -213,7 +236,7 @@ class PlannerAgent(NeuralAgent):
                 extra = [(i, j, a)] if i >= 0 else None
             if self.value is not None and extra is None:
                 try:
-                    best = plan_ranked(s, me, *self.value, self.horizon, self.fractions, self.top, self.mix)
+                    best = plan_ranked(s, me, *self.value, self.horizon, self.fractions, self.top, self.mix, self.budget_ms)
                 except Exception as e:  # fall back to the hand-written score
                     print("PlannerAgent value error:", repr(e), flush=True)
                     best = plan(s, me, self.horizon, self.fractions)

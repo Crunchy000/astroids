@@ -46,10 +46,13 @@ def options(plan, s, me, h_eff, top, params=None, heads=None):
     ships = jnp.concatenate([out["cand_ships_final"], out["base_ships"][None]])
     hand = jnp.concatenate([out["cand_score"], out["base"][None]])
     ok = jnp.isfinite(hand)
-    v = None
-    if params is not None:
-        v = jax.vmap(lambda o, sh: policy.apply(params, heads, fresh(s, o, sh, s.tick + h_eff), me)[2])(owners, ships)
+    v = net_values(params, heads, s, me, owners, ships, h_eff) if params is not None else None
     return out, owners, ships, hand, ok, v
+
+
+def net_values(params, heads, s, me, owners, ships, h_eff):
+    """The value network's number for each projected position in `owners`, `ships` ([options, N])."""
+    return jax.vmap(lambda o, sh: policy.apply(params, heads, fresh(s, o, sh, s.tick + h_eff), me)[2])(owners, ships)
 
 
 def totals(s, me, owners, hand, v, mix, scale=200.0):
@@ -61,11 +64,12 @@ def totals(s, me, owners, hand, v, mix, scale=200.0):
     return total + jnp.where(won & ~lost, 10.0, 0.0) - jnp.where(lost & ~won, 10.0, 0.0)
 
 
-def make_decider(plan, top, params=None, heads=None):
+def make_decider(plan, top, params=None, heads=None, params2=None, heads2=None):
     """decide(s, me, h, eps, kind, key) -> (action, (afterstate owners, ships, ticks looked ahead, hand score)).
 
     kind 0 plays the planner's hand score, 1 the value network alone, 2 the network mixed half and half with the
-    hand score. With probability eps one of the usable options is picked at random instead."""
+    hand score, 3 a second (older) network mixed the same way. With probability eps one of the usable options is
+    picked at random instead."""
     def decide(s, me, h, eps, kind, key):
         h_eff = jnp.maximum(jnp.minimum(h, s.max_ticks - s.tick), 1)
         out, owners, ships, hand, ok, v = options(plan, s, me, h_eff, top, params, heads)
@@ -76,6 +80,9 @@ def make_decider(plan, top, params=None, heads=None):
             by_v = jnp.where(ok, totals(s, me, owners, hand, v, 0.0), -jnp.inf)
             by_mix = jnp.where(ok, totals(s, me, owners, hand, v, 0.5), -jnp.inf)
             score = jnp.where(kind == 0, by_hand, jnp.where(kind == 1, by_v, by_mix))
+            if params2 is not None:
+                v2 = net_values(params2, heads2, s, me, owners, ships, h_eff)
+                score = jnp.where(kind == 3, jnp.where(ok, totals(s, me, owners, hand, v2, 0.5), -jnp.inf), score)
         k1, k2 = jax.random.split(key)
         rand = (jax.random.uniform(k1) < eps) & ok.any()
         pick = jnp.where(rand, jax.random.categorical(k2, jnp.where(ok, 0.0, -jnp.inf)), jnp.argmax(score))
@@ -116,10 +123,10 @@ def make_value_agent(params, heads, sources=12, horizon=90, top=8, mix=0.0, scal
 
 # ---------------------------------------------------------------- game generation
 
-def make_gen(cfg, n_envs, params=None, heads=None):
+def make_gen(cfg, n_envs, params=None, heads=None, params2=None, heads2=None):
     """gen(state carry, per-side settings, key) plays `cfg.chunk` ticks, recording every `stride`th."""
     plan = jplanner.make_planner(cfg.sources, cfg.horizon, cfg.top)
-    decide = make_decider(plan, cfg.top, params, heads)
+    decide = make_decider(plan, cfg.top, params, heads, params2, heads2)
     v_decide = jax.vmap(decide)
     v_step, v_term, v_greedy = jax.vmap(env.step), jax.vmap(env.is_terminal), jax.vmap(baselines.greedy)
     one, two = jnp.ones(n_envs, jnp.int32), jnp.full(n_envs, 2, jnp.int32)
@@ -161,7 +168,7 @@ def play_batch(cfg, bank, map_ids, rng, key, gen):
     pick = lambda a: jnp.asarray(rng.choice(a, size=n).astype(a.dtype))  # noqa: E731
     greedy = lambda: jnp.asarray(rng.random(n) < cfg.p_greedy)  # noqa: E731
     kind_p = np.array([float(x) for x in cfg.kinds.split(",")])
-    kinds = lambda: jnp.asarray(rng.choice(3, size=n, p=kind_p[:3] / kind_p[:3].sum()).astype(np.int32))  # noqa: E731
+    kinds = lambda: jnp.asarray(rng.choice(len(kind_p), size=n, p=kind_p / kind_p.sum()).astype(np.int32))  # noqa: E731
     sides = (pick(HORIZONS), pick(HORIZONS), pick(EPS), pick(EPS), greedy(), greedy(), kinds(), kinds())
     mi = jnp.asarray(map_ids)
     s = jax.vmap(lambda i: env.from_bank(bank, i))(mi)
@@ -199,13 +206,14 @@ def cmd_gen(cfg):
         bank_np = maps.make_bank(cfg.maps + cfg.val_maps, seed=cfg.seed, param_fn=maps.cog2026_params)
     np.savez(os.path.join(cfg.out, "maps.npz"), **bank_np)
     params, heads = evaluate.load(cfg.value) if cfg.value else (None, None)
+    params2, heads2 = evaluate.load(cfg.value2) if cfg.value2 else (None, None)
     bank = {k: jnp.asarray(v) for k, v in bank_np.items()}
     rng = np.random.default_rng(cfg.seed)
     key = jax.random.PRNGKey(cfg.seed)
     for name, lo, hi, nb in (("val", cfg.maps, cfg.maps + cfg.val_maps, 1), ("train", 0, cfg.maps, cfg.batches)):
         parts, t0 = [], time.time()
         n = min(cfg.envs, hi - lo)
-        gen = make_gen(cfg, n, params, heads)
+        gen = make_gen(cfg, n, params, heads, params2, heads2)
         for b in range(nb):
             ids = rng.integers(lo, hi, size=n)
             key, k = jax.random.split(key)
@@ -344,10 +352,10 @@ def opponent(name):
     or a policy .npz played greedily."""
     if name == "hand":
         return make_hand_agent(12, 90, 8)
-    if name.startswith("value:"):  # value:PATH:MIX, a value-ranked planner
-        _, path, mix = name.split(":")
+    if name.startswith("value:"):  # value:PATH:MIX[:TOP], a value-ranked planner
+        path, mix, *top = name.split(":")[1:]
         params, heads = evaluate.load(path)
-        return make_value_agent(params, heads, 12, 90, 8, float(mix))
+        return make_value_agent(params, heads, 12, 90, int(top[0]) if top else 8, float(mix))
     if name.endswith(".npz"):
         pol, heads = evaluate.load(name)
         return evaluate.agent_fn("policy", pol, heads, False)
@@ -391,7 +399,9 @@ def main(argv=None):
     g.add_argument("--top", type=int, default=8)
     g.add_argument("--p-greedy", type=float, default=0.1)
     g.add_argument("--value", default=None, help="value network: some sides then play it (see --kinds)")
-    g.add_argument("--kinds", default="1,0,0", help="odds a side plays: hand-scored planner, value alone, value mixed with hand")
+    g.add_argument("--value2", default=None, help="a second, older value network for kind 3")
+    g.add_argument("--kinds", default="1,0,0", help="odds a side plays: hand-scored planner, value alone, value mixed with hand, "
+                   "second network mixed with hand")
     g.add_argument("--bank-from", default=None, help="directory of an earlier run whose maps.npz to reuse")
     g.add_argument("--seed", type=int, default=0)
     t = sub.add_parser("train")

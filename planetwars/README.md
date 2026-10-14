@@ -113,9 +113,25 @@ noise of 32 games); the one clear difference between rounds is in playing each o
 before about two games in three. The Titans games ran in the Kotlin runner against the entry's Python server: 21 to
 24 ms a move on average, no timeouts at 200 ms (35 ms on a 30-planet map in a separate timing run, slowest 78 ms).
 `PW_TOP`, `PW_MIX` and `PW_VALUE` change the number of launches re-ranked, the mix and the weights file (`off` for the
-hand score alone). `tests/test_planner.py` checks the JAX planner against the numpy one, and the numpy value ranking
+hand score alone); `PW_BUDGET_MS` caps the time spent re-ranking. `tests/test_planner.py` checks the JAX planner against the numpy one, and the numpy value ranking
 against the JAX one. Every round learns from its own predecessor's games, so a fourth round would measure itself more
 and more against a planner it already beats; the real test is the league's other agents.
+
+**More candidates.** The hand score picks which launches the network gets to see, and that turned out to limit
+strength more than the network did. The same round 3 network re-ranking more of the hand score's best launches, in
+JAX, 1,024 games against itself re-ranking fewer (score counts a draw as half):
+
+| Re-ranks | Against | Score |
+|---|---|---:|
+| 4 launches | 8 | 0.316 |
+| 12 launches | 8 | 0.645 |
+| 16 launches | 8 | 0.713 |
+| 24 launches | 16 | 0.667 |
+| 32 launches | 16 | 0.702 |
+
+The entry now re-ranks up to 32 launches. Time is the limit (about 1.5 ms per launch on one CPU core), so it works
+through them in chunks of 8, best hand score first, and stops when 90 ms are spent, then picks the best seen so far.
+Against TeamTitansAgentV3 in the Kotlin runner: 32 of 32 games, 0 timeouts at 200 ms, 21 ms a move on average.
 
 The earlier value network in "A value function trained on game results (did not help)" below was asked a
 different question, which of the policy's own moves is worth most, and the policy's moves were not where
