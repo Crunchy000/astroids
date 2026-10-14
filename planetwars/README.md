@@ -87,30 +87,33 @@ policy (3 layers, 128 wide), and only its value output is used. It sees the proj
 fleets in flight and the clock moved on to the tick the projection ends at, and predicts who ends up
 with more ships on planets (+1 win, -1 loss).
 
-It was trained on planner games, not on the policy's: 32,000 games on random league maps, each side with
-its own look-ahead (60 to 100 ticks), some random launches, and one side in ten playing their greedy agent. Every 8 ticks the
-position each side's chosen launch leads to was recorded, labelled with the game's result: 8 million
-positions, in about ten minutes on one A100 (`python -m pwjax.lvalue gen`, then `train`). With only 8,000 games
-the network memorised them (held-out error rose while training error fell), so the data matters more than
-the network size. On held-out games its error is 0.384 against 0.410 for the hand score rescaled to fit
-the results as well as it can be, and it picks the winner 85.2% of the time (hand score 84.4%).
+It was trained on planner games, not on the policy's, in two rounds (`python -m pwjax.lvalue gen`, `train`, `match`).
+Round 1: 32,000 games on random league maps, each side with its own look-ahead (60 to 100 ticks), some random
+launches, and one side in ten playing their greedy agent. Every 8 ticks the position each side's chosen launch
+leads to was recorded and labelled with the game's result: 8 million positions, about ten minutes of games on one
+A100. With only 8,000 games the network memorised them (held-out error rose while training error fell), so the
+data matters more than the network size. Round 2: 16,000 more games in which the round 1 network played (alone, or
+mixed half and half with the hand score, against either), then training continued on all of it. On held-out games
+the round 2 network's error is 0.353 and it picks the winner 86.7% of the time; the hand score, rescaled to fit
+the results as well as it can be, gets 0.395 and 85.1%.
 
-The gain shows up in play, not in the error. Head to head in JAX (`python -m pwjax.lvalue match`), 512 league
-maps, both sides, 1,024 games, value planner against the hand-scored planner:
+The gain shows up much more in play than in the error. Head to head in JAX, 512 league maps, both sides, 1,024
+games (the Titans games are in the real engine, 32 games):
 
-| Opponent | Value planner wins | Hand-scored planner wins |
-|---|---:|---:|
-| The hand-scored planner | 874 / 1,024 (85%) | |
-| TeamTitansAgentV3 (league #19), real engine, 200 ms | 31 / 32 | 24 / 32 |
-| Their greedy agent | 1,008 / 1,024 | 994 / 1,024 |
-| Their rush bot | 1,012 / 1,024 | 1,016 / 1,024 |
-| The trained network, iteration 450 | 948 / 1,024 | 922 / 1,024 |
+| Opponent | Round 2 | Round 1 | Hand-scored planner |
+|---|---:|---:|---:|
+| The hand-scored planner | 979 / 1,024 | 874 / 1,024 | |
+| The round 1 value planner | 714 / 1,024 | | |
+| TeamTitansAgentV3 (league #19), 200 ms | 32 / 32 | 31 / 32 | 24 / 32 |
+| Their greedy agent | 1,019 / 1,024 | 1,008 / 1,024 | 994 / 1,024 |
+| Their rush bot | | 1,012 / 1,024 | 1,016 / 1,024 |
+| The trained network, iteration 450 | 993 / 1,024 | 948 / 1,024 | 922 / 1,024 |
 
-The first row is the mixed network-and-score choice; the network alone wins 876. The Titans games ran in the Kotlin
-runner against the entry's Python server. The value planner averaged 17 ms a move (35 ms on a 30-planet map in a
-separate timing run, slowest 78 ms) and had no timeouts at 200 ms. `PW_TOP`, `PW_MIX` and `PW_VALUE` change the
-number of launches re-ranked, the mix and the weights file. `tests/test_planner.py` checks the JAX planner against the numpy one, and
-the numpy value ranking against the JAX one.
+Round 2 is what ships. The Titans games ran in the Kotlin runner against the entry's Python server: 24 ms a move
+on average, no timeouts at 200 ms (35 ms on a 30-planet map in a separate timing run, slowest 78 ms). `PW_TOP`,
+`PW_MIX` and `PW_VALUE` change the number of launches re-ranked, the mix and the weights file (`off` for the hand
+score alone). `tests/test_planner.py` checks the JAX planner against the numpy one, and the numpy value ranking
+against the JAX one.
 
 The earlier value network in "A value function trained on game results (did not help)" below was asked a
 different question, which of the policy's own moves is worth most, and the policy's moves were not where

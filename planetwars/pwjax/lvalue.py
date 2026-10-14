@@ -340,9 +340,14 @@ def cmd_train(cfg):
 # ---------------------------------------------------------------- head to head
 
 def opponent(name):
-    """An agent function for 'hand' (the hand-scored planner), a sample bot, or a policy .npz played greedily."""
+    """An agent function for 'hand' (the hand-scored planner), 'value:PATH:MIX' (value-ranked planner), a sample bot,
+    or a policy .npz played greedily."""
     if name == "hand":
         return make_hand_agent(12, 90, 8)
+    if name.startswith("value:"):  # value:PATH:MIX, a value-ranked planner
+        _, path, mix = name.split(":")
+        params, heads = evaluate.load(path)
+        return make_value_agent(params, heads, 12, 90, 8, float(mix))
     if name.endswith(".npz"):
         pol, heads = evaluate.load(name)
         return evaluate.agent_fn("policy", pol, heads, False)
