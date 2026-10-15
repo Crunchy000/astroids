@@ -224,3 +224,41 @@ def test_projected_launch_sizes():
         ok = np.isfinite(np.asarray(out["cand_score"]))
         src, n = np.asarray(out["cand_src"]), np.asarray(out["cand_ships"])
         assert ok.any() and all(1 <= n[i] <= ships[src[i]] for i in np.nonzero(ok)[0])
+
+
+def test_numpy_launch_sizes_match_the_jax_ones():
+    """The entry's numpy planner offers the same (source, target, ships) launches, and scores them the same, as the JAX one."""
+    import jax
+    import jax.numpy as jnp
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+    from pwjax import baselines, env, maps
+    from pwjax import planner as jplanner
+
+    extras = ("cap", "spare", "f:0.9", "cap:1.2:1", "spare:0.5", "f:0.5")
+    fractions = (0.25, 0.5, 1.0)
+    big = 32 * (len(fractions) + len(extras)) * 30
+    plan = jax.jit(jplanner.make_planner(sources=32, horizon=90, top=big, fractions=fractions, extras=extras))
+    step, greedy = jax.jit(env.step), jax.jit(baselines.greedy)
+    compared = 0
+    for seed in range(2):
+        bank = {k: jnp.asarray(v) for k, v in maps.make_bank(1, seed=seed + 20, param_fn=maps.cog2026_params).items()}
+        s = env.from_bank(bank, 0)
+        for t in range(240):
+            if t % 60 == 30:
+                for me in (1, 2):
+                    out = plan(s, me, 90)
+                    ok = np.isfinite(np.asarray(out["cand_score"]))
+                    got = {(int(i), int(j), float(c)): float(v) for i, j, c, v in zip(
+                        np.asarray(out["cand_src"])[ok], np.asarray(out["cand_dst"])[ok], np.asarray(out["cand_ships"])[ok],
+                        np.asarray(out["cand_score"])[ok])}
+                    ns = _numpy_view(s)
+                    c = planner.candidates(ns, me, 90, fractions, None, extras)
+                    want = {}
+                    for i, j, n, v in zip(c["ci"], c["cj"], c["cn"], c["score"]):
+                        want.setdefault((int(i), int(j), float(n)), float(v))
+                    assert set(got) == set(want), (len(got), len(want), sorted(set(got) ^ set(want))[:5])
+                    for k in got:
+                        assert abs(got[k] - want[k]) < 0.05 + 1e-4 * abs(want[k]), (k, got[k], want[k])
+                    compared += len(got)
+            s = step(s, greedy(s, 1), greedy(s, 2))
+    assert compared > 500

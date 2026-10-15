@@ -25,6 +25,7 @@ from core.game_state import Action, Player
 HORIZON = int(os.environ.get("PW_HORIZON", "90"))
 AMOUNTS = os.environ.get("PW_AMOUNTS", "0.25,0.5,1.0")
 FRACTIONS = tuple(float(x) for x in AMOUNTS.split(","))
+SIZES = tuple(x for x in os.environ.get("PW_SIZES", "").split("+") if x)  # launch sizes beyond the fractions: see `launch_size`
 TOP = int(os.environ.get("PW_TOP", "32"))       # most launches the value network re-ranks (best hand score first)
 BUDGET_MS = float(os.environ.get("PW_BUDGET_MS", "90"))  # stop adding launches to re-rank past this many ms into a move
 CHUNK = 8                                       # launches per pass through the network
@@ -61,6 +62,31 @@ def run(owner, ships, growth, a1, a2):
         owner = np.where(neutral, n_owner, p_owner)
         ships = np.where(neutral, n_ships, p_ships)
     return owner, ships
+
+
+def parse_size(spec):
+    """'f:X' (a fraction of the source's ships), 'cap[:M[:C]]' (what takes the target when the fleet lands, times M, plus
+    1 and C), 'spare[:X]' (a fraction of what the source can do without); 'capm' and 'spare2' are short for
+    'cap:1.2:1' and 'spare:0.5'. The same sizes as pwjax.planner."""
+    spec = {"capm": "cap:1.2:1", "spare2": "spare:0.5"}.get(spec, spec)
+    kind, *args = spec.split(":")
+    assert kind in ("f", "cap", "spare"), spec
+    vals = [float(x) for x in args]
+    if kind == "cap":
+        vals = (vals + [1.0, 0.0])[:2] if len(vals) < 2 else vals
+    elif kind == "spare":
+        vals = vals or [1.0]
+    return kind, tuple(vals)
+
+
+def base_states(owner, ships, growth, a1, a2):
+    """[H, n] owners and ships of every planet just before each tick of the nobody-launches projection."""
+    po, ps = [], []
+    for k in range(a1.shape[0]):
+        po.append(owner)
+        ps.append(ships)
+        owner, ships = run(owner, ships, growth, a1[k:k + 1], a2[k:k + 1])
+    return np.array(po), np.array(ps)
 
 
 def arrivals(s, horizon):
@@ -113,11 +139,13 @@ def project(s, me, horizon, ci, cj, cn, a1, a2, base_owner, base_ships, d):
     return all_owner, all_ships
 
 
-def candidates(s, me, horizon=HORIZON, fractions=FRACTIONS, extra=None):
+def candidates(s, me, horizon=HORIZON, fractions=FRACTIONS, extra=None, extras=SIZES):
     """Every launch the rules allow and where it leaves the map `horizon` ticks on, with the hand score of that.
 
     Returns None when there is nothing to launch from, else a dict: ci, cj, cn (source, target, ships), owner and
     ships ([C, n] after the horizon), score ([C]), and the same for waiting: base_owner, base_ships, base.
+    `fractions` are shares of the source's ships; `extras` more sizes (see `parse_size`), dropped where they repeat an
+    earlier size for the same source and target.
     """
     n = s.ships.shape[0]
     horizon = max(1, min(horizon, int(s.max_ticks - s.tick)))
@@ -130,15 +158,38 @@ def candidates(s, me, horizon=HORIZON, fractions=FRACTIONS, extra=None):
     srcs = np.nonzero((s.owner == me) & ~s.tr_on & (s.ships >= 1.0))[0]
     if srcs.size == 0:
         return None
+    sizes = [parse_size(e) for e in extras]
+    if any(k != "f" for k, _ in sizes):  # sizes worked out from the projection
+        po, ps = base_states(s.owner.copy(), s.ships.copy(), s.growth, a1, a2)
+        k_all = arrival_step(d, s.radius[None, :], s.speed)                      # [n, n] tick a fleet from i lands on j
+        kk = np.minimum(k_all, horizon - 1)
+        cols = np.arange(n)[None, :]
+        mine_in, opp_in = (a1 if me == 1 else a2)[kk, cols], (a2 if me == 1 else a1)[kk, cols]
+        before_o, before_s = po[kk, cols], ps[kk, cols]
+        need = before_s + np.where(before_o != 0, s.growth[None, :], 0.0) + opp_in - mine_in
+        lands = (k_all < horizon) & (before_o != me)
+        kept = (po == me).all(0)                                                  # the projection never loses planet i
+        spare = np.where(kept, np.floor(ps.min(0)), 0.0)
     ci, cj, cn = [], [], []
-    for frac in fractions:
-        amt = np.maximum(1.0, np.floor(s.ships[srcs] * frac))
-        ok = amt <= s.ships[srcs]
-        for i, a, good in zip(srcs, amt, ok):
-            if not good:
-                continue
+    tried = {i: [] for i in srcs}                                                 # sizes already tried per source and target
+    options = [("f", (f,)) for f in fractions] + sizes
+    for f, (kind, v) in enumerate(options):
+        for i in srcs:
             dst = np.array([j for j in range(n) if j != i])
-            ci.append(np.full(dst.size, i)); cj.append(dst); cn.append(np.full(dst.size, a))
+            if f < len(fractions):
+                x = np.full(dst.size, max(1.0, np.floor(s.ships[i] * v[0])))
+            elif kind == "cap":
+                x = np.where(lands[i, dst], np.floor(np.maximum(need[i, dst], 0.0) * v[0]) + 1.0 + v[1], 0.0)
+            elif kind == "spare":
+                x = np.full(dst.size, np.floor(spare[i] * v[0]))
+            else:
+                x = np.full(dst.size, max(1.0, np.floor(s.ships[i] * v[0])))
+            ok = (x >= 1.0) & (x <= s.ships[i])
+            if f >= len(fractions):  # not a size already tried for this pair
+                for earlier in tried[i]:
+                    ok &= x != earlier
+            tried[i].append(x)
+            ci.append(np.full(int(ok.sum()), i)); cj.append(dst[ok]); cn.append(x[ok])
     if extra:
         for i, j, a in extra:
             ci.append(np.array([i])); cj.append(np.array([j])); cn.append(np.array([a]))
@@ -150,9 +201,9 @@ def candidates(s, me, horizon=HORIZON, fractions=FRACTIONS, extra=None):
                 base_owner=base_owner, base_ships=base_ships, base=base, horizon=horizon)
 
 
-def plan(s, me, horizon=HORIZON, fractions=FRACTIONS, extra=None):
+def plan(s, me, horizon=HORIZON, fractions=FRACTIONS, extra=None, extras=SIZES):
     """Best launch as (src, dst, ships), or None to wait. `extra`: more (src, dst, ships) moves to consider."""
-    c = candidates(s, me, horizon, fractions, extra)
+    c = candidates(s, me, horizon, fractions, extra, extras)
     if c is None:
         return None
     best = int(np.argmax(c["score"]))
@@ -179,13 +230,13 @@ def value_many(params, heads, s, me, owners, shipss, tick):
     return pwnet.value_batch(np, params, heads, np.stack(planets).astype(dt), np.stack(globs).astype(dt), valid)
 
 
-def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=TOP, mix=MIX, budget_ms=BUDGET_MS):
+def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=TOP, mix=MIX, budget_ms=BUDGET_MS, extras=SIZES):
     """Like `plan`, but the best launches by hand score (and waiting) are re-ranked by the value network, mixed with
     the hand score as (1 - mix) * value + mix * tanh(hand / 200). Launches go through the network eight at a time,
     best hand score first, until `top` have been seen or `budget_ms` (counted from the start of this call) would be
     exceeded by another batch, so a slow machine looks at fewer. Returns (src, dst, ships) or None to wait."""
     started = time.perf_counter()
-    c = candidates(s, me, horizon, fractions)
+    c = candidates(s, me, horizon, fractions, None, extras)
     if c is None:
         return None
     order = np.argsort(-c["score"], kind="stable")[:top]
@@ -215,9 +266,9 @@ def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=
 class PlannerAgent(NeuralAgent):
     """Tries every launch each tick (see the module docstring)."""
 
-    def __init__(self, horizon=HORIZON, fractions=FRACTIONS, use_policy=USE_POLICY, value=VALUE, top=TOP, mix=MIX, budget_ms=BUDGET_MS):
+    def __init__(self, horizon=HORIZON, fractions=FRACTIONS, use_policy=USE_POLICY, value=VALUE, top=TOP, mix=MIX, budget_ms=BUDGET_MS, extras=SIZES):
         super().__init__()
-        self.horizon, self.fractions, self.use_policy = horizon, tuple(fractions), use_policy
+        self.horizon, self.fractions, self.use_policy, self.extras = horizon, tuple(fractions), use_policy, tuple(extras)
         self.value, self.top, self.mix, self.budget_ms = None, top, mix, budget_ms
         if value and value != "off" and os.path.exists(value):
             params, heads = load(value)  # ranks the planner's best launches (single precision: twice as fast, same picks)
@@ -236,12 +287,12 @@ class PlannerAgent(NeuralAgent):
                 extra = [(i, j, a)] if i >= 0 else None
             if self.value is not None and extra is None:
                 try:
-                    best = plan_ranked(s, me, *self.value, self.horizon, self.fractions, self.top, self.mix, self.budget_ms)
+                    best = plan_ranked(s, me, *self.value, self.horizon, self.fractions, self.top, self.mix, self.budget_ms, self.extras)
                 except Exception as e:  # fall back to the hand-written score
                     print("PlannerAgent value error:", repr(e), flush=True)
-                    best = plan(s, me, self.horizon, self.fractions)
+                    best = plan(s, me, self.horizon, self.fractions, extras=self.extras)
             else:
-                best = plan(s, me, self.horizon, self.fractions, extra=extra)
+                best = plan(s, me, self.horizon, self.fractions, extra=extra, extras=self.extras)
             if best is None:
                 return Action.do_nothing()
             src, dst, ships = best
