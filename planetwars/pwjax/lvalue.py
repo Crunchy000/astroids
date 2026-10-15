@@ -64,13 +64,13 @@ def totals(s, me, owners, hand, v, mix, scale=200.0):
     return total + jnp.where(won & ~lost, 10.0, 0.0) - jnp.where(lost & ~won, 10.0, 0.0)
 
 
-def make_decider(plan, top, params=None, heads=None, params2=None, heads2=None):
-    """decide(s, me, h, eps, kind, key) -> (action, (afterstate owners, ships, ticks looked ahead, hand score)).
+def make_decider(plan, top, params=None, heads=None, has2=False, heads2=None):
+    """decide(s, me, h, eps, kind, key, params2) -> (action, (afterstate owners, ships, ticks looked ahead, hand score)).
 
     kind 0 plays the planner's hand score, 1 the value network alone, 2 the network mixed half and half with the
-    hand score, 3 a second (older) network mixed the same way. With probability eps one of the usable options is
-    picked at random instead."""
-    def decide(s, me, h, eps, kind, key):
+    hand score, 3 a second (older) network, passed in as `params2`, mixed the same way. With probability eps one of the
+    usable options is picked at random instead."""
+    def decide(s, me, h, eps, kind, key, params2=None):
         h_eff = jnp.maximum(jnp.minimum(h, s.max_ticks - s.tick), 1)
         out, owners, ships, hand, ok, v = options(plan, s, me, h_eff, top, params, heads)
         by_hand = jnp.where(ok, hand - jnp.where(jnp.arange(top + 1) == top, 2e-3, 0.0), -jnp.inf)  # waiting wins ties
@@ -80,7 +80,7 @@ def make_decider(plan, top, params=None, heads=None, params2=None, heads2=None):
             by_v = jnp.where(ok, totals(s, me, owners, hand, v, 0.0), -jnp.inf)
             by_mix = jnp.where(ok, totals(s, me, owners, hand, v, 0.5), -jnp.inf)
             score = jnp.where(kind == 0, by_hand, jnp.where(kind == 1, by_v, by_mix))
-            if params2 is not None:
+            if has2:
                 v2 = net_values(params2, heads2, s, me, owners, ships, h_eff)
                 score = jnp.where(kind == 3, jnp.where(ok, totals(s, me, owners, hand, v2, 0.5), -jnp.inf), score)
         k1, k2 = jax.random.split(key)
@@ -96,16 +96,17 @@ def make_decider(plan, top, params=None, heads=None, params2=None, heads2=None):
     return decide
 
 
-def make_hand_agent(sources=12, horizon=90, top=8):
+def make_hand_agent(sources=12, horizon=90, top=8, fractions=jplanner.FRACTIONS, extras=()):
     """The planner as an agent function (state, me, key) -> action."""
-    decide = make_decider(jplanner.make_planner(sources, horizon, top), top)
+    decide = make_decider(jplanner.make_planner(sources, horizon, top, fractions, extras), top)
     return lambda s, me, key: decide(s, me, horizon, 0.0, 0, key)[0]
 
 
-def make_value_agent(params, heads, sources=12, horizon=90, top=8, mix=0.0, scale=200.0, wait=True):
+def make_value_agent(params, heads, sources=12, horizon=90, top=8, mix=0.0, scale=200.0, wait=True,
+                     fractions=jplanner.FRACTIONS, extras=()):
     """The planner's `top` launches (by hand score) and waiting, re-ranked by the value network
     (mixed with the hand score as `(1 - mix) * value + mix * tanh(hand / scale)`)."""
-    plan = jplanner.make_planner(sources, horizon, top)
+    plan = jplanner.make_planner(sources, horizon, top, fractions, extras)
 
     def act(s, me, key):
         del key
@@ -123,38 +124,44 @@ def make_value_agent(params, heads, sources=12, horizon=90, top=8, mix=0.0, scal
 
 # ---------------------------------------------------------------- game generation
 
-def make_gen(cfg, n_envs, params=None, heads=None, params2=None, heads2=None):
-    """gen(state carry, per-side settings, key) plays `cfg.chunk` ticks, recording every `stride`th."""
-    plan = jplanner.make_planner(cfg.sources, cfg.horizon, cfg.top)
-    decide = make_decider(plan, cfg.top, params, heads, params2, heads2)
-    v_decide = jax.vmap(decide)
+def make_gen(cfg, n_envs, params=None, heads=None, has2=False, heads2=None):
+    """gen(state carry, per-side settings, key, params2) plays `cfg.chunk` ticks, recording every `stride`th."""
+    plan = jplanner.make_planner(cfg.sources, cfg.horizon, cfg.top, parse_fractions(cfg.fractions), parse_extras(cfg.extras))
+    decide = make_decider(plan, cfg.top, params, heads, has2, heads2)
+    v_decide = jax.vmap(decide, in_axes=(0, 0, 0, 0, 0, 0, None))
     v_step, v_term, v_greedy = jax.vmap(env.step), jax.vmap(env.is_terminal), jax.vmap(baselines.greedy)
     one, two = jnp.ones(n_envs, jnp.int32), jnp.full(n_envs, 2, jnp.int32)
 
-    def tick(c, sides, k):
+    def now_scores(s):
+        """The hand score of the position as it stands (planets only), for each player: what the dense targets are made of."""
+        near = jplanner.near_matrix(s)
+        return jnp.stack([jplanner.score_final(s.owner, s.ships, s, 1, near), jplanner.score_final(s.owner, s.ships, s, 2, near)])
+
+    def tick(c, sides, k, p2):
         s, done = c
         h1, h2, e1, e2, g1, g2, q1, q2 = sides
         ka, kb = jax.random.split(k)
-        a1, r1 = v_decide(s, one, h1, e1, q1, jax.random.split(ka, n_envs))
-        a2, r2 = v_decide(s, two, h2, e2, q2, jax.random.split(kb, n_envs))
+        a1, r1 = v_decide(s, one, h1, e1, q1, jax.random.split(ka, n_envs), p2)
+        a2, r2 = v_decide(s, two, h2, e2, q2, jax.random.split(kb, n_envs), p2)
         gr1, gr2 = v_greedy(s, one), v_greedy(s, two)
         a1 = tuple(jnp.where(g1, g, p) for g, p in zip(gr1, a1))
         a2 = tuple(jnp.where(g2, g, p) for g, p in zip(gr2, a2))
         s2 = tree_where(done, s, v_step(s, a1, a2))
         return (s2, done | v_term(s2)), (r1, r2)
 
-    def chunk(c, sides, key):
+    def chunk(c, sides, key, p2):
         def one_tick(c, k):
-            return tick(c, sides, k)[0], None
+            return tick(c, sides, k, p2)[0], None
 
         def snap_block(c, k):
             ks = jax.random.split(k, cfg.stride)
             c1, _ = jax.lax.scan(one_tick, c, ks[:-1])
             alive = ~c1[1]
-            c2, (r1, r2) = tick(c1, sides, ks[-1])
+            c2, (r1, r2) = tick(c1, sides, ks[-1], p2)
             rec = dict(alive=alive, tick=c1[0].tick,
                        owner=jnp.stack([r1[0], r2[0]], 1).astype(jnp.int8), ships=jnp.stack([r1[1], r2[1]], 1),
-                       h=jnp.stack([r1[2], r2[2]], 1), hand=jnp.stack([r1[3], r2[3]], 1))
+                       h=jnp.stack([r1[2], r2[2]], 1), hand=jnp.stack([r1[3], r2[3]], 1),
+                       now=jax.vmap(now_scores)(c1[0]).astype(jnp.float32))
             return c2, rec
 
         return jax.lax.scan(snap_block, c, jax.random.split(key, cfg.chunk // cfg.stride))
@@ -162,7 +169,10 @@ def make_gen(cfg, n_envs, params=None, heads=None, params2=None, heads2=None):
     return jax.jit(chunk)
 
 
-def play_batch(cfg, bank, map_ids, rng, key, gen):
+DENSE_OFFSETS = (3, 6, 12)  # snapshots ahead (stride ticks each): the score of the real position then, as extra targets
+
+
+def play_batch(cfg, bank, map_ids, rng, key, gen, p2=None):
     """Play one batch of games from the given maps; returns the recorded positions and results."""
     n = len(map_ids)
     pick = lambda a: jnp.asarray(rng.choice(a, size=n).astype(a.dtype))  # noqa: E731
@@ -178,7 +188,7 @@ def play_batch(cfg, bank, map_ids, rng, key, gen):
         if bool(c[1].all()):
             break
         key, k = jax.random.split(key)
-        c, rec = gen(c, sides, k)
+        c, rec = gen(c, sides, k, p2)
         recs.append(rec)
     lead = jax.vmap(env.leader)(c[0])
     z1 = jnp.where(lead == 1, 1.0, jnp.where(lead == 2, -1.0, 0.0))
@@ -190,6 +200,15 @@ def play_batch(cfg, bank, map_ids, rng, key, gen):
         v = np.asarray(flat[k])
         out[k] = v.reshape((-1,) + v.shape[2:])[ids] if k != "tick" else v.reshape(-1)[ids]
     snaps, envs = flat["alive"].shape
+    # dense targets: how the real position scores 24, 48 and 96 ticks later (the game's end if sooner), squashed
+    alive_m = np.asarray(flat["alive"])
+    last = np.where(alive_m.any(0), snaps - 1 - np.argmax(alive_m[::-1], 0), 0)
+    now = np.asarray(flat["now"])                                              # [snaps, envs, 2]
+    future = [np.take_along_axis(now, np.minimum(np.arange(snaps)[:, None] + k, last[None, :])[..., None], 0)
+              for k in DENSE_OFFSETS]
+    out["dense"] = np.tanh(np.stack(future, -1) / 200.0).astype(np.float32).reshape(snaps * envs, 2, len(DENSE_OFFSETS))[ids]
+    out["kinds"] = np.stack([np.broadcast_to(np.asarray(sides[6])[None, :], (snaps, envs)).reshape(-1)[ids],
+                             np.broadcast_to(np.asarray(sides[7])[None, :], (snaps, envs)).reshape(-1)[ids]], 1).astype(np.int8)
     out["map"] = np.broadcast_to(np.asarray(map_ids)[None, :], (snaps, envs)).reshape(-1)[ids]
     out["z1"] = np.broadcast_to(np.asarray(z1)[None, :], (snaps, envs)).reshape(-1)[ids]
     out["greedy"] = np.stack([np.broadcast_to(np.asarray(sides[4])[None, :], (snaps, envs)).reshape(-1)[ids],
@@ -206,21 +225,39 @@ def cmd_gen(cfg):
         bank_np = maps.make_bank(cfg.maps + cfg.val_maps, seed=cfg.seed, param_fn=maps.cog2026_params)
     np.savez(os.path.join(cfg.out, "maps.npz"), **bank_np)
     params, heads = evaluate.load(cfg.value) if cfg.value else (None, None)
-    params2, heads2 = evaluate.load(cfg.value2) if cfg.value2 else (None, None)
+    # older networks the current one plays against (kind 3 sides): --value2 and --pool, picked by how well we do against them
+    pool = []
+    for path in [x for x in [cfg.value2] + cfg.pool.split(",") if x]:
+        pr, hd = evaluate.load(path)
+        pool.append((path, {k: v for k, v in pr.items() if not k.startswith("aux.")}, hd))
+    heads2 = pool[0][2] if pool else None
+    winrate = np.full(len(pool), 0.5)
     bank = {k: jnp.asarray(v) for k, v in bank_np.items()}
     rng = np.random.default_rng(cfg.seed)
     key = jax.random.PRNGKey(cfg.seed)
     for name, lo, hi, nb in (("val", cfg.maps, cfg.maps + cfg.val_maps, 1), ("train", 0, cfg.maps, cfg.batches)):
         parts, t0 = [], time.time()
         n = min(cfg.envs, hi - lo)
-        gen = make_gen(cfg, n, params, heads, params2, heads2)
+        gen = make_gen(cfg, n, params, heads, bool(pool), heads2)
         for b in range(nb):
             ids = rng.integers(lo, hi, size=n)
             key, k = jax.random.split(key)
-            part, _, z1 = play_batch(cfg, bank, ids, rng, k, gen)
+            j = None
+            if pool:  # prioritized: opponents we beat less often get more games
+                w = (1.0 - winrate + 0.05) ** cfg.pfsp
+                j = int(rng.choice(len(pool), p=w / w.sum()))
+            part, _, z1 = play_batch(cfg, bank, ids, rng, k, gen, pool[j][1] if pool else None)
             parts.append(part)
-            print(json.dumps(dict(set=name, batch=b + 1, positions=len(part["z1"]), win1=round(float((z1 > 0).mean()), 3),
-                                  win2=round(float((z1 < 0).mean()), 3), seconds=round(time.time() - t0, 1))), flush=True)
+            row = dict(set=name, batch=b + 1, positions=len(part["z1"]), win1=round(float((z1 > 0).mean()), 3),
+                       win2=round(float((z1 < 0).mean()), 3), seconds=round(time.time() - t0, 1))
+            if pool:
+                k1, k2, z = part["kinds"][:, 0], part["kinds"][:, 1], part["z1"]
+                main = ((k1 == 3) & np.isin(k2, (1, 2))) | ((k2 == 3) & np.isin(k1, (1, 2)))
+                won = np.where(k1 == 3, z < 0, z > 0)[main]
+                if main.any():
+                    winrate[j] = 0.5 * winrate[j] + 0.5 * float(won.mean())
+                row.update(opponent=pool[j][0], main_wins_vs_it=round(float(won.mean()), 3) if main.any() else None)
+            print(json.dumps(row), flush=True)
         data = {k: np.concatenate([p[k] for p in parts]) for k in parts[0]}
         np.savez(os.path.join(cfg.out, f"{name}.npz"), **data)
 
@@ -232,10 +269,18 @@ def load_set(path):
     return {k: z[k] for k in z.files}
 
 
-def make_values(bank, heads):
+def make_values(bank, heads, aux=False):
+    """vmapped network value of positions (and, with aux, the extra outputs trained on the dense targets)."""
+    pwnet = policy.pwnet
+
     def one(params, i, owner, ships, tick, me):
         s = fresh(env.from_bank(bank, i), owner, ships, tick)
-        return policy.apply(params, heads, s, me)[2]
+        if not aux:
+            return policy.apply(params, heads, s, me)[2]
+        planet, glob, _, _ = pwnet.features(jnp, s, me)
+        _, g = pwnet.trunk(jnp, params, heads, planet, glob, s.valid)
+        hid = jnp.maximum(g @ params["v1.w"] + params["v1.b"], 0.0)
+        return (hid @ params["v2.w"] + params["v2.b"])[0], hid @ params["aux.w"] + params["aux.b"]
     return jax.vmap(one, in_axes=(None, 0, 0, 0, 0, 0))
 
 
@@ -245,10 +290,18 @@ def cmd_train(cfg):
     for extra in [d for d in cfg.extra.split(",") if d]:  # more games on the same maps
         other = np.load(os.path.join(extra, "maps.npz"))
         assert all(np.array_equal(other[k], np.asarray(bank[k])) for k in ("pos", "growth", "max_ticks")), "different maps"
-        train = {k: np.concatenate([train[k], v]) for k, v in load_set(os.path.join(extra, "train.npz")).items()}
-        val = {k: np.concatenate([val[k], v]) for k, v in load_set(os.path.join(extra, "val.npz")).items()}
+        more_t, more_v = load_set(os.path.join(extra, "train.npz")), load_set(os.path.join(extra, "val.npz"))
+        keep = [k for k in train if k in more_t and k in more_v]  # earlier runs have no dense targets: then none are used
+        train = {k: np.concatenate([train[k], more_t[k]]) for k in keep}
+        val = {k: np.concatenate([val[k], more_v[k]]) for k in keep}
+    use_aux = "dense" in train and cfg.aux_weight > 0
     params, heads = evaluate.load(cfg.init)
+    n_aux = train["dense"].shape[-1] if use_aux else 0
+    if n_aux and "aux.w" not in params:  # extra outputs on the value head, used only while training
+        params["aux.w"] = jax.random.normal(jax.random.PRNGKey(cfg.seed + 1), (params["v1.w"].shape[1], n_aux)) * 0.01
+        params["aux.b"] = jnp.zeros(n_aux)
     values = make_values(bank, heads)
+    values_aux = make_values(bank, heads, aux=True)
     opt = optax.chain(optax.clip_by_global_norm(1.0), optax.adam(1.0, eps=1e-5))
     opt_state = opt.init(params)
 
@@ -261,7 +314,8 @@ def cmd_train(cfg):
                     ships=np.concatenate([d["ships"][:, 0], d["ships"][:, 1]]),
                     tick=np.concatenate([d["tick"] + d["h"][:, 0], d["tick"] + d["h"][:, 1]]),
                     hand=np.concatenate([d["hand"][:, 0], d["hand"][:, 1]]), me=me, z=z,
-                    greedy=np.concatenate([d["greedy"][:, 0], d["greedy"][:, 1]]))
+                    greedy=np.concatenate([d["greedy"][:, 0], d["greedy"][:, 1]]),
+                    **({"dense": np.concatenate([d["dense"][:, 0], d["dense"][:, 1]])} if use_aux else {}))
     tr, va = mover_arrays(train), mover_arrays(val)
     # drop positions where the mover was the greedy bot: its "chosen" position is just the planner's idea
     keep_t, keep_v = ~tr["greedy"].astype(bool), ~va["greedy"].astype(bool)
@@ -276,8 +330,12 @@ def cmd_train(cfg):
     def loss_fn(params, b, flip):
         me = jnp.where(flip, 3 - b["me"], b["me"])
         z = jnp.where(flip, -b["z"], b["z"])
-        v = values(params, b["map"], b["owner"], b["ships"], b["tick"], me)
-        return jnp.mean((v - z) ** 2)
+        if not n_aux:
+            v = values(params, b["map"], b["owner"], b["ships"], b["tick"], me)
+            return jnp.mean((v - z) ** 2)
+        v, aux = values_aux(params, b["map"], b["owner"], b["ships"], b["tick"], me)
+        dense = jnp.where(flip[:, None], -b["dense"], b["dense"])
+        return jnp.mean((v - z) ** 2) + cfg.aux_weight * jnp.mean((aux - dense) ** 2)
 
     @jax.jit
     def train_chunk(params, opt_state, key, lr):
@@ -347,28 +405,91 @@ def cmd_train(cfg):
 
 # ---------------------------------------------------------------- head to head
 
+def parse_fractions(text):
+    return tuple(float(x) for x in text.split(",")) if text else jplanner.FRACTIONS
+
+
+def parse_extras(text):
+    return tuple(e for e in text.split("+") if e) if text else ()
+
+
 def opponent(name):
-    """An agent function for 'hand' (the hand-scored planner), 'value:PATH:MIX' (value-ranked planner), a sample bot,
-    or a policy .npz played greedily."""
-    if name == "hand":
-        return make_hand_agent(12, 90, 8)
-    if name.startswith("value:"):  # value:PATH:MIX[:TOP], a value-ranked planner
-        path, mix, *top = name.split(":")[1:]
+    """An agent function for 'hand' (the hand-scored planner), 'value:PATH:MIX[:TOP]' (value-ranked planner), a sample bot,
+    or a policy .npz played greedily. The planner kinds take options after semicolons: 'hand;extras=cap+spare:0.5;fractions=0.25,0.5,1'
+    (launch sizes beyond the fractions of the source's ships, see planner.make_planner), e.g.
+    'value:v4.npz:0.5:16;extras=cap'."""
+    head, *kv = name.split(";")
+    opts = dict(x.split("=", 1) for x in kv)
+    fractions, extras = parse_fractions(opts.get("fractions", "")), parse_extras(opts.get("extras", ""))
+    if head == "hand":
+        return make_hand_agent(12, 90, 8, fractions, extras)
+    if head.startswith("value:"):  # value:PATH:MIX[:TOP], a value-ranked planner
+        path, mix, *top = head.split(":")[1:]
         params, heads = evaluate.load(path)
-        return make_value_agent(params, heads, 12, 90, int(top[0]) if top else 8, float(mix))
-    if name.endswith(".npz"):
-        pol, heads = evaluate.load(name)
+        return make_value_agent(params, heads, 12, 90, int(top[0]) if top else 8, float(mix), fractions=fractions, extras=extras)
+    if head.endswith(".npz"):
+        pol, heads = evaluate.load(head)
         return evaluate.agent_fn("policy", pol, heads, False)
-    return evaluate.agent_fn(name)
+    return evaluate.agent_fn(head)
+
+
+def score_of(agent, other, bank, seed, cfg):
+    sc, ticks = play_chunked(agent, other, bank, jax.random.PRNGKey(seed), cfg.chunk, cfg.max_steps)
+    sc = np.asarray(sc)
+    return sc, float(np.asarray(ticks).mean())
+
+
+def cmd_gauntlet(cfg):
+    """Greedy forward selection of launch sizes: every size in the pool is added to the current set in turn and the
+    result played against the current set (same maps, both sides); the best is kept while it wins clearly."""
+    bank = {k: jnp.asarray(v) for k, v in maps.make_bank(cfg.games, seed=cfg.seed, param_fn=maps.cog2026_params).items()}
+    pool = [e for e in cfg.pool.split(",") if e]
+    cur = list(parse_extras(cfg.start))
+    base = cfg.base
+    fr = cfg.fractions
+
+    def agent(extras):
+        return opponent(f"{base};extras={'+'.join(extras)};fractions={fr}")
+
+    n_games = 2 * cfg.games
+    se = 0.5 / np.sqrt(n_games)
+    for rnd in range(cfg.rounds):
+        cur_agent = agent(cur)
+        results = []
+        for c in pool:
+            if c in cur:
+                continue
+            t0 = time.time()
+            sc, mt = score_of(agent(cur + [c]), cur_agent, bank, cfg.seed, cfg)
+            results.append((float(sc.mean()), c))
+            print(json.dumps(dict(round=rnd + 1, current=cur, add=c, score=round(float(sc.mean()), 4), wins=int((sc == 1).sum()),
+                                  losses=int((sc == 0).sum()), games=len(sc), mean_ticks=round(mt, 1),
+                                  seconds=round(time.time() - t0, 1))), flush=True)
+        if not results:
+            break
+        best = max(results)
+        verdict = best[0] > 0.5 + cfg.z * se
+        print(json.dumps(dict(round=rnd + 1, best=best[1], score=round(best[0], 4), needed=round(0.5 + cfg.z * se, 4), added=bool(verdict))), flush=True)
+        if not verdict:
+            break
+        cur.append(best[1])
+    # which of the chosen sizes can go without losing: drop each in turn and play the full set against the rest
+    for c in list(cur):
+        rest = [x for x in cur if x != c]
+        sc, _ = score_of(agent(rest), agent(cur), bank, cfg.seed, cfg)
+        print(json.dumps(dict(drop=c, score_without=round(float(sc.mean()), 4), games=len(sc))), flush=True)
+    print(json.dumps(dict(final=cur, fractions=fr)), flush=True)
 
 
 def cmd_match(cfg):
     bank = {k: jnp.asarray(v) for k, v in maps.make_bank(cfg.games, seed=cfg.seed, param_fn=maps.cog2026_params).items()}
+    fractions, extras = parse_fractions(cfg.fractions), parse_extras(cfg.extras)
     if cfg.value == "hand":
-        runs = [("hand", make_hand_agent(cfg.sources, cfg.horizon, cfg.top))]
+        runs = [("hand", make_hand_agent(cfg.sources, cfg.horizon, cfg.top, fractions, extras))]
     else:
         params, heads = evaluate.load(cfg.value)
-        runs = [(f"mix={m}", make_value_agent(params, heads, cfg.sources, cfg.horizon, cfg.top, float(m), wait=not cfg.no_wait))
+        runs = [(f"mix={m}", make_value_agent(params, heads, cfg.sources, cfg.horizon, cfg.top, float(m), wait=not cfg.no_wait,
+                                              fractions=fractions, extras=extras))
                 for m in cfg.mix.split(",")]
     for opp in cfg.vs.split(","):
         fb = opponent(opp)
@@ -376,7 +497,7 @@ def cmd_match(cfg):
             t0 = time.time()
             sc, ticks = play_chunked(agent, fb, bank, jax.random.PRNGKey(cfg.seed), cfg.chunk, cfg.max_steps)
             sc = np.asarray(sc)
-            print(json.dumps(dict(agent=name, value=cfg.value, vs=opp, top=cfg.top, horizon=cfg.horizon, games=len(sc),
+            print(json.dumps(dict(agent=name, value=cfg.value, extras=cfg.extras, fractions=cfg.fractions, vs=opp, top=cfg.top, horizon=cfg.horizon, games=len(sc),
                                   score=round(float(sc.mean()), 4), wins=int((sc == 1).sum()), draws=int((sc == 0.5).sum()),
                                   losses=int((sc == 0).sum()), mean_ticks=round(float(np.asarray(ticks).mean()), 1),
                                   seconds=round(time.time() - t0, 1))), flush=True)
@@ -400,8 +521,13 @@ def main(argv=None):
     g.add_argument("--p-greedy", type=float, default=0.1)
     g.add_argument("--value", default=None, help="value network: some sides then play it (see --kinds)")
     g.add_argument("--value2", default=None, help="a second, older value network for kind 3")
+    g.add_argument("--pool", default="", help="more older value networks, comma separated: each batch plays one of them as kind 3, "
+                   "picked more often the less we beat it")
+    g.add_argument("--pfsp", type=float, default=2.0, help="how strongly the pool favours opponents we beat less often")
     g.add_argument("--kinds", default="1,0,0", help="odds a side plays: hand-scored planner, value alone, value mixed with hand, "
                    "second network mixed with hand")
+    g.add_argument("--extras", default="", help="launch sizes beyond the fractions, '+' separated (see planner.make_planner)")
+    g.add_argument("--fractions", default="", help="fractions of the source's ships to try (default 0.25,0.5,1)")
     g.add_argument("--bank-from", default=None, help="directory of an earlier run whose maps.npz to reuse")
     g.add_argument("--seed", type=int, default=0)
     t = sub.add_parser("train")
@@ -416,6 +542,8 @@ def main(argv=None):
     t.add_argument("--lr", type=float, default=3e-4)
     t.add_argument("--lr-end", type=float, default=3e-5)
     t.add_argument("--flip", type=float, default=0.25, help="share of samples shown from the other side's view")
+    t.add_argument("--aux-weight", type=float, default=0.5, help="weight of the dense targets (how the real position scores "
+                   "24, 48 and 96 ticks later) next to the game result; 0 turns them off")
     t.add_argument("--seed", type=int, default=0)
     m = sub.add_parser("match")
     m.add_argument("value", help="value network .npz, or 'hand' for the hand-scored planner")
@@ -426,12 +554,25 @@ def main(argv=None):
     m.add_argument("--sources", type=int, default=12)
     m.add_argument("--horizon", type=int, default=90)
     m.add_argument("--no-wait", action="store_true")
+    m.add_argument("--extras", default="", help="launch sizes beyond the fractions for the tested agent, '+' separated")
+    m.add_argument("--fractions", default="", help="fractions of the source's ships for the tested agent")
     m.add_argument("--chunk", type=int, default=250)
     m.add_argument("--max-steps", type=int, default=2001)
     m.add_argument("--seed", type=int, default=777)
+    q = sub.add_parser("gauntlet")
+    q.add_argument("--base", default="hand", help="the agent whose launch sizes are chosen: hand, or value:PATH:MIX[:TOP]")
+    q.add_argument("--pool", required=True, help="sizes to try, comma separated: f:0.35, cap, cap:1.2:1, spare, spare:0.5, ...")
+    q.add_argument("--start", default="", help="sizes the set starts with, '+' separated")
+    q.add_argument("--fractions", default="0.25,0.5,1.0", help="the fractions every set includes")
+    q.add_argument("--games", type=int, default=256, help="maps (each played from both sides)")
+    q.add_argument("--rounds", type=int, default=4)
+    q.add_argument("--z", type=float, default=2.0, help="standard errors above one half needed to add a size")
+    q.add_argument("--chunk", type=int, default=250)
+    q.add_argument("--max-steps", type=int, default=2001)
+    q.add_argument("--seed", type=int, default=777)
     cfg = a.parse_args(argv)
     print("devices:", jax.devices(), flush=True)
-    {"gen": cmd_gen, "train": cmd_train, "match": cmd_match}[cfg.cmd](cfg)
+    {"gen": cmd_gen, "train": cmd_train, "match": cmd_match, "gauntlet": cmd_gauntlet}[cfg.cmd](cfg)
 
 
 if __name__ == "__main__":

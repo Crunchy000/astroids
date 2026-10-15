@@ -189,3 +189,38 @@ def test_numpy_value_ranking_matches_the_jax_agent():
                 same += int((want is None and got[0] < 0) or (want is not None and (int(got[0]), int(got[1])) == want[:2]))
         s = env.step(s, policy.sample_t(params, 4, s, 1, k1, 1.0, 0.5), policy.sample_t(params, 4, s, 2, k2, 1.0, 0.5))
     assert total >= 20 and same >= 0.85 * total, (same, total)
+
+
+def test_projected_launch_sizes():
+    """'cap' takes the target when the fleet lands, 'spare' leaves the source in our hands, every size is legal."""
+    import jax
+    import jax.numpy as jnp
+    from pwjax import baselines, env, maps
+    from pwjax import planner as jplanner
+
+    bank = {k: jnp.asarray(v) for k, v in maps.make_bank(1, seed=5, param_fn=maps.cog2026_params).items()}
+    s = env.from_bank(bank, 0)
+    step, greedy = jax.jit(env.step), jax.jit(baselines.greedy)
+    for _ in range(120):  # fleets in flight, planets changing hands
+        s = step(s, greedy(s, 1), greedy(s, 2))
+    for me in (1, 2):
+        only = lambda *e: jax.jit(jplanner.make_planner(sources=32, horizon=90, top=24, fractions=(), extras=e))  # noqa: E731
+        out = only("cap")(s, me, 90)
+        ok = np.isfinite(np.asarray(out["cand_score"]))
+        assert ok.any()
+        src, dst, n = np.asarray(out["cand_src"]), np.asarray(out["cand_dst"]), np.asarray(out["cand_ships"])
+        ships = np.asarray(s.ships)
+        owner_after = np.asarray(out["cand_owner"])
+        for i in np.nonzero(ok)[0]:
+            assert 1 <= n[i] <= ships[src[i]]
+            assert owner_after[i][dst[i]] == me, (me, i)  # nobody else acts in the projection, so the capture sticks
+        out = only("spare")(s, me, 90)
+        ok = np.isfinite(np.asarray(out["cand_score"]))
+        src, n = np.asarray(out["cand_src"]), np.asarray(out["cand_ships"])
+        for i in np.nonzero(ok)[0]:
+            assert 1 <= n[i] <= ships[src[i]]
+            assert np.asarray(out["cand_owner"])[i][src[i]] == me
+        out = only("f:0.3", "cap:1.5:3", "spare:0.5")(s, me, 90)
+        ok = np.isfinite(np.asarray(out["cand_score"]))
+        src, n = np.asarray(out["cand_src"]), np.asarray(out["cand_ships"])
+        assert ok.any() and all(1 <= n[i] <= ships[src[i]] for i in np.nonzero(ok)[0])
