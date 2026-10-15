@@ -127,11 +127,13 @@ def make_planner(sources=12, horizon=90, top=8, fractions=FRACTIONS, extras=()):
               projection loses the planet
       spare:X a fraction X of that
       f:X     a fraction X of the source's ships
-    Duplicates of an earlier size for the same source and target are dropped.
+    Duplicates of an earlier size for the same source and target are dropped. The extra 'pair' (not a size) keeps only
+    the best size, by hand score, for each source and target, so the `top` slots go to different moves.
     Keys: action (src, dst, ships), best, base (scores of the best move and of waiting), cand_src/dst/ships/score [top],
     cand_owner/cand_ships [top, N] (projected positions), base_owner/base_ships [N].
     """
-    extras = tuple(parse_size(e) for e in extras)
+    per_pair = "pair" in extras
+    extras = tuple(parse_size(e) for e in extras if e != "pair")
     nf = len(fractions) + len(extras)
 
     def plan(s: env.State, me, h_eff):
@@ -203,6 +205,9 @@ def make_planner(sources=12, horizon=90, top=8, fractions=FRACTIONS, extras=()):
         f_ships = jnp.where(is_j, ds[..., None], jnp.where(is_i, ss[..., None], bs))
         sc = score_final(f_owner, f_ships, s, me, near)                            # [K, F, N]
         sc = jnp.where(ok, sc, -jnp.inf)
+        if per_pair:
+            best_f = jnp.argmax(sc, 1)                                             # [K, N] the size the hand score likes best
+            sc = jnp.where(jnp.arange(nf)[None, :, None] == best_f[:, None, :], sc, -jnp.inf)
         base = score_final(bo, bs, s, me, near)
         flat = sc.reshape(-1)
         vals, pick = jax.lax.top_k(flat, top)

@@ -262,3 +262,26 @@ def test_numpy_launch_sizes_match_the_jax_ones():
                     compared += len(got)
             s = step(s, greedy(s, 1), greedy(s, 2))
     assert compared > 500
+
+
+def test_pair_keeps_one_size_per_move():
+    import jax
+    import jax.numpy as jnp
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+    from pwjax import baselines, env, maps
+    from pwjax import planner as jplanner
+
+    bank = {k: jnp.asarray(v) for k, v in maps.make_bank(1, seed=6, param_fn=maps.cog2026_params).items()}
+    s = env.from_bank(bank, 0)
+    step, greedy = jax.jit(env.step), jax.jit(baselines.greedy)
+    for _ in range(100):
+        s = step(s, greedy(s, 1), greedy(s, 2))
+    big = 32 * 5 * 30
+    both = jax.jit(jplanner.make_planner(sources=32, horizon=90, top=big, extras=("f:0.9", "spare")))
+    pair = jax.jit(jplanner.make_planner(sources=32, horizon=90, top=big, extras=("f:0.9", "spare", "pair")))
+    for me in (1, 2):
+        a, b = both(s, me, 90), pair(s, me, 90)
+        fa, fb = np.isfinite(np.asarray(a["cand_score"])), np.isfinite(np.asarray(b["cand_score"]))
+        moves = list(zip(np.asarray(b["cand_src"])[fb], np.asarray(b["cand_dst"])[fb]))
+        assert len(moves) == len(set(moves)) and len(moves) < fa.sum()
+        assert float(a["best"]) == float(b["best"])  # the best launch is the best of its own pair
