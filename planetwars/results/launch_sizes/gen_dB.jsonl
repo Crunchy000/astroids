@@ -1,0 +1,13 @@
+{"set": "val", "batch": 1, "positions": 70047, "win1": 0.553, "win2": 0.439, "seconds": 353.0, "opponent": "/content/v2_best.npz", "main_wins_vs_it": 0.726}
+{"set": "train", "batch": 1, "positions": 139183, "win1": 0.499, "win2": 0.493, "seconds": 685.9, "opponent": "/content/v2_best.npz", "main_wins_vs_it": 0.714}
+{"set": "train", "batch": 2, "positions": 136375, "win1": 0.497, "win2": 0.499, "seconds": 1312.8, "opponent": "/content/v2_best.npz", "main_wins_vs_it": 0.703}
+{"set": "train", "batch": 3, "positions": 139669, "win1": 0.539, "win2": 0.455, "seconds": 1939.5, "opponent": "/content/v2_best.npz", "main_wins_vs_it": 0.677}
+{"set": "train", "batch": 4, "positions": 135269, "win1": 0.496, "win2": 0.49, "seconds": 2566.2, "opponent": "/content/v2_best.npz", "main_wins_vs_it": 0.706}
+{"set": "train", "batch": 5, "positions": 136103, "win1": 0.495, "win2": 0.492, "seconds": 3192.9, "opponent": "/content/v2_best.npz", "main_wins_vs_it": 0.69}
+{"set": "train", "batch": 6, "positions": 135353, "win1": 0.46, "win2": 0.527, "seconds": 3819.7, "opponent": "/content/v2_best.npz", "main_wins_vs_it": 0.686}
+{"set": "train", "batch": 7, "positions": 135813, "win1": 0.518, "win2": 0.474, "seconds": 4446.5, "opponent": "/content/v2_best.npz", "main_wins_vs_it": 0.685}
+{"set": "train", "batch": 8, "positions": 136085, "win1": 0.488, "win2": 0.499, "seconds": 5073.1, "opponent": "/content/v2_best.npz", "main_wins_vs_it": 0.7}
+{"set": "train", "batch": 9, "positions": 136405, "win1": 0.515, "win2": 0.471, "seconds": 5700.0, "opponent": "/content/v2_best.npz", "main_wins_vs_it": 0.67}
+{"set": "train", "batch": 10, "positions": 134191, "win1": 0.531, "win2": 0.459, "seconds": 6326.7, "opponent": "/content/v2_best.npz", "main_wins_vs_it": 0.722}
+{"set": "train", "batch": 11, "positions": 138434, "win1": 0.509, "win2": 0.485, "seconds": 6860.3, "opponent": "/content/v2_best.npz", "main_wins_vs_it": 0.69}
+{"set": "train", "batch": 12, "positions": 136710, "win1": 0.518, "win2": 0.472, "seconds": 7444.0, "opponent": "/content/v2_best.npz", "main_wins_vs_it": 0.714}

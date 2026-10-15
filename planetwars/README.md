@@ -23,7 +23,7 @@ planetwars/
     Dockerfile     their Python template: python:3.11-slim, port 8080
     main.py        GameServerAgent(host="0.0.0.0", port=8080, agent=PlannerAgent()); PW_AGENT=neural serves the network
     planner.py     the all-moves planner (numpy only), the default agent
-    value.npz      value network that re-ranks the planner's best launches (trained on planner games)
+    value.npz      value network that re-ranks the planner's best launches (round 5, trained on planner games)
     agent.py       the neural agent (numpy only)
     pwnet.py       features + network, shared verbatim with training (numpy or jax.numpy)
     model.npz      trained weights (self-play iteration 450)
@@ -131,11 +131,60 @@ JAX, 1,024 games against itself re-ranking fewer (score counts a draw as half):
 
 A fourth round of self-play (16,000 games with 16 launches re-ranked, round 3 and round 2 as the opponents, training
 continued from round 3) did not improve on round 3: head to head at 16 launches it won 485 of 1,024 games (a score of
-0.474), so the entry keeps the round 3 network. The gain from here came from looking at more launches, not from more rounds.
+0.474), so round 4 was not used. The gain from here came from looking at more launches, not from more rounds; the next
+section, which adds the dense targets, is the round that did help.
 
 The entry now re-ranks up to 32 launches. Time is the limit (about 1.5 ms per launch on one CPU core), so it works
 through them in chunks of 8, best hand score first, and stops when 90 ms are spent, then picks the best seen so far.
 Against TeamTitansAgentV3 in the Kotlin runner: 32 of 32 games, 0 timeouts at 200 ms, 21 ms a move on average.
+
+**Dense targets, and launch sizes.** Two changes, tried together on an A100 (about 24 Colab compute units in all).
+
+*Dense targets.* The value head only ever saw the game's final result. Round 5 trains the same network to predict, in
+extra outputs the entry does not use (`aux.w`, `aux.b`), how the position scores 24, 48 and 96 ticks later (the hand
+score of the real position, squashed with tanh(score / 200)), alongside the result. The games are the round 4 recipe
+(sides play the hand score 15% of the time, the round 3 network alone 20% or mixed with the hand score 35%, and an older
+network 30%; 16 launches re-ranked; 12 batches of 1,024 games; training continued from round 3 for 8,000 steps) with those
+targets added.
+Head to head at 16 launches, round 3 against round 5, in JAX:
+
+| Maps | Plays | Round 5 wins | Round 3 wins | Score |
+|---|---:|---:|---:|---:|
+| 512 | 1,024 | 554 | 470 | 0.541 |
+| 1,024 (other maps) | 2,048 | 1,111 | 936 | 0.543 |
+
+Round 4, with no dense targets, scored 0.474 on the same test, so the targets look like what made the difference (one
+run of each, so the size of the effect is uncertain). Held-out error on the new games is about the same as
+round 3's (0.341, picks the winner 87.8% of the time), so the error says little about which network plays better.
+
+*Launch sizes.* A launch is a fraction (a quarter, half, all) of the source's ships. The planner can now also try sizes
+worked out from its own projection: `spare` (everything the source can do without, its smallest garrison over the
+projection, or nothing if the projection loses the planet), `cap` (just enough to take the target when the fleet lands)
+and extra fractions (`f:0.9`). `python -m pwjax.lvalue gauntlet` picks sizes by playing every candidate size added to the
+current set against the current set, on the same maps and from both sides, and keeps one only when it wins by two standard
+errors. Results (a score of 0.5 is even):
+
+| Agent | Added size | Plays | Score |
+|---|---|---:|---:|
+| Hand-scored planner | `f:0.9` | 512 | 0.557 (kept) |
+| Hand-scored planner | `spare` | 512 | 0.543 |
+| Hand-scored planner | `cap`, `cap:1.2:1`, `cap:1.5:3` | 512 each | 0.455 to 0.498 |
+| Round 3 network, 12 launches | best (`spare`) | 512 | 0.518 (nothing kept) |
+| Round 5 network, 16 launches | `spare` / `spare:0.5` / `cap:1.2:1` | 512 each | 0.533 / 0.520 / 0.504 (nothing kept) |
+| Round 5 network, 16 launches | `f:0.75` / `f:0.9` | 512 each | 0.371 / 0.379 |
+| Round 5 network, 32 launches | `spare` | 512 | 0.547 (kept, needed 0.544) |
+| Round 5 network, 32 launches | `f:0.9` / `f:0.75` | 512 each | 0.387 / 0.398 |
+
+`spare` is the one that holds up: 0.522 at 16 launches and 0.538 at 32 launches in a longer test (2,048 plays each, round 5
+network with `spare` against the same network without). Extra fractions hurt a network that only sees 16 or 32 launches:
+they fill its slots with near-copies of the same move. Keeping only the best size for each source and target made it much
+worse (0.278), so the network is using the choice of size, not just the choice of move. A network trained on games played
+with `f:0.9`, `spare` and `cap:1.2:1` in the mix (round 5b) did not do better with them (0.475 against round 3, and it lost
+to round 5, 0.539 for round 5); the gauntlet found nothing to add for it either.
+
+What ships: the round 5 network (`entry/value.npz`) and `spare` (`PW_SIZES=spare`, empty for none), 32 launches. Against the
+round 3 network at 32 launches, in JAX: 1,197 to 851 of 2,048 plays (0.585). Against the hand-scored planner: 2,017 to 31.
+The numpy planner's launch sizes are checked against the JAX ones in `tests/test_planner.py`.
 
 The earlier value network in "A value function trained on game results (did not help)" below was asked a
 different question, which of the policy's own moves is worth most, and the policy's moves were not where

@@ -1,0 +1,2 @@
+{"agent": "mix=0.5", "value": "/content/runs/v_dA/best.npz", "extras": "", "fractions": "", "vs": "value:/content/v4_best.npz:0.5:16", "top": 16, "horizon": 90, "games": 2048, "score": 0.5427, "wins": 1111, "draws": 1, "losses": 936, "mean_ticks": 969.8, "seconds": 866.1}
+{"agent": "mix=0.5", "value": "/content/runs/v_dA/best.npz", "extras": "spare", "fractions": "", "vs": "value:/content/runs/v_dA/best.npz:0.5:16", "top": 16, "horizon": 90, "games": 2048, "score": 0.522, "wins": 1068, "draws": 2, "losses": 978, "mean_ticks": 1060.6, "seconds": 725.0}

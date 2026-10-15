@@ -25,7 +25,7 @@ from core.game_state import Action, Player
 HORIZON = int(os.environ.get("PW_HORIZON", "90"))
 AMOUNTS = os.environ.get("PW_AMOUNTS", "0.25,0.5,1.0")
 FRACTIONS = tuple(float(x) for x in AMOUNTS.split(","))
-SIZES = tuple(x for x in os.environ.get("PW_SIZES", "").split("+") if x)  # launch sizes beyond the fractions: see `launch_size`
+SIZES = tuple(x for x in os.environ.get("PW_SIZES", "spare").split("+") if x)  # the agent's launch sizes beyond the fractions: see `parse_size`
 TOP = int(os.environ.get("PW_TOP", "32"))       # most launches the value network re-ranks (best hand score first)
 BUDGET_MS = float(os.environ.get("PW_BUDGET_MS", "90"))  # stop adding launches to re-rank past this many ms into a move
 CHUNK = 8                                       # launches per pass through the network
@@ -139,7 +139,7 @@ def project(s, me, horizon, ci, cj, cn, a1, a2, base_owner, base_ships, d):
     return all_owner, all_ships
 
 
-def candidates(s, me, horizon=HORIZON, fractions=FRACTIONS, extra=None, extras=SIZES):
+def candidates(s, me, horizon=HORIZON, fractions=FRACTIONS, extra=None, extras=()):
     """Every launch the rules allow and where it leaves the map `horizon` ticks on, with the hand score of that.
 
     Returns None when there is nothing to launch from, else a dict: ci, cj, cn (source, target, ships), owner and
@@ -201,7 +201,7 @@ def candidates(s, me, horizon=HORIZON, fractions=FRACTIONS, extra=None, extras=S
                 base_owner=base_owner, base_ships=base_ships, base=base, horizon=horizon)
 
 
-def plan(s, me, horizon=HORIZON, fractions=FRACTIONS, extra=None, extras=SIZES):
+def plan(s, me, horizon=HORIZON, fractions=FRACTIONS, extra=None, extras=()):
     """Best launch as (src, dst, ships), or None to wait. `extra`: more (src, dst, ships) moves to consider."""
     c = candidates(s, me, horizon, fractions, extra, extras)
     if c is None:
@@ -230,7 +230,7 @@ def value_many(params, heads, s, me, owners, shipss, tick):
     return pwnet.value_batch(np, params, heads, np.stack(planets).astype(dt), np.stack(globs).astype(dt), valid)
 
 
-def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=TOP, mix=MIX, budget_ms=BUDGET_MS, extras=SIZES):
+def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=TOP, mix=MIX, budget_ms=BUDGET_MS, extras=()):
     """Like `plan`, but the best launches by hand score (and waiting) are re-ranked by the value network, mixed with
     the hand score as (1 - mix) * value + mix * tanh(hand / 200). Launches go through the network eight at a time,
     best hand score first, until `top` have been seen or `budget_ms` (counted from the start of this call) would be

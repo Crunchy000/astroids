@@ -1,0 +1,9 @@
+{"round": 1, "current": [], "add": "f:0.1", "score": 0.4297, "wins": 220, "losses": 292, "games": 512, "mean_ticks": 1169.3, "seconds": 360.6}
+{"round": 1, "current": [], "add": "f:0.75", "score": 0.4648, "wins": 238, "losses": 274, "games": 512, "mean_ticks": 1118.3, "seconds": 333.4}
+{"round": 1, "current": [], "add": "f:0.9", "score": 0.4258, "wins": 218, "losses": 294, "games": 512, "mean_ticks": 1120.3, "seconds": 332.8}
+{"round": 1, "current": [], "add": "spare", "score": 0.5176, "wins": 264, "losses": 246, "games": 512, "mean_ticks": 1128.6, "seconds": 357.5}
+{"round": 1, "current": [], "add": "spare:0.5", "score": 0.5117, "wins": 261, "losses": 249, "games": 512, "mean_ticks": 1150.5, "seconds": 422.1}
+{"round": 1, "current": [], "add": "cap:1.2:1", "score": 0.5117, "wins": 261, "losses": 249, "games": 512, "mean_ticks": 1139.5, "seconds": 409.0}
+{"round": 1, "current": [], "add": "cap:1.5:3", "score": 0.4688, "wins": 238, "losses": 270, "games": 512, "mean_ticks": 1156.0, "seconds": 409.3}
+{"round": 1, "best": "spare", "score": 0.5176, "needed": 0.5442, "added": false}
+{"final": [], "fractions": "0.25,0.5,1.0"}
