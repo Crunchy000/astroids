@@ -1,0 +1,18 @@
+tail_small,tail-small (CoG 2026 winner; league games only)
+metagross,metagross (league games only)
+entry,Our entry (round-3 value net)
+anti_2_lite,anti_2_lite (league games only)
+egocentric,EgoCentric
+planner_hand,Our hand-scored planner
+titans,TeamTitansAgentV3
+gnn_cont999,gnn_cont999 (league games only)
+sebba14_v2,sebba14-v2
+nanaboshi,nanaboshi (league games only)
+nn_it450,Our iteration-450 network
+genetic_v1,genetic_v1
+galactic_armada,GalacticArmada
+greedy,GreedyHeuristicAgent
+evo_big,SimpleEvoAgent (60 evals)
+evo,SimpleEvoAgent (default)
+careful,CarefulRandomAgent
+better,BetterRandomAgent

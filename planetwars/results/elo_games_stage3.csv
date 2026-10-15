@@ -1,0 +1,6 @@
+a,b,a_wins,b_wins,draws,source,a_timeouts,b_timeouts,a_ms,b_ms
+entry,egocentric,53.0,3.0,0.0,stage3,4,0,28.48,1.55
+entry,egocentric,48.0,8.0,0.0,stage3,2,0,30.95,1.71
+entry,egocentric,48.0,8.0,0.0,stage3,0,0,36.16,1.63
+entry,sebba14_v2,40.0,0.0,0.0,stage3,0,0,22.52,4.94
+entry,titans,80.0,0.0,0.0,stage3,0,0,25.03,1.45

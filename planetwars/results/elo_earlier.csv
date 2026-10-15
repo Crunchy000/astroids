@@ -1,0 +1,21 @@
+a,b,a_wins,b_wins,draws,source
+nn_it450,evo,100,0,0,earlier: their SimpleEvoAgent (default)
+nn_it450,evo_big,36,0,0,earlier: SimpleEvoAgent 60 evals
+nn_it450,greedy,99,1,0,earlier
+nn_it450,careful,100,0,0,earlier
+nn_it450,better,100,0,0,earlier
+nn_it450,titans,1,71,0,earlier: real engine
+nn_it450,sebba14_v2,10,26,0,earlier: real engine
+nn_it450,genetic_v1,53,27,0,earlier
+nn_it450,galactic_armada,74,6,0,earlier
+planner_hand,nn_it450,57,3,0,earlier
+planner_hand,titans,24,8,0,earlier: real engine
+planner_hand,sebba14_v2,32,4,0,earlier: real engine
+planner_hand,genetic_v1,18,2,0,earlier
+planner_hand,galactic_armada,20,0,0,earlier
+planner_hand,greedy,60,0,0,earlier
+planner_hand,careful,60,0,0,earlier
+planner_hand,better,60,0,0,earlier
+planner_hand,evo,60,0,0,earlier
+entry,titans,32,0,0,32-launch entry
+entry,egocentric,47,1,0,48 games in three batches
