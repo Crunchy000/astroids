@@ -23,7 +23,7 @@ planetwars/
     Dockerfile     their Python template: python:3.11-slim, port 8080
     main.py        GameServerAgent(host="0.0.0.0", port=8080, agent=PlannerAgent()); PW_AGENT=neural serves the network
     planner.py     the all-moves planner (numpy only), the default agent
-    value.npz      value network that re-ranks the planner's best launches (round 5, trained on planner games)
+    value.npz      value network that re-ranks the planner's best launches (round 6, trained on planner games)
     agent.py       the neural agent (numpy only)
     pwnet.py       features + network, shared verbatim with training (numpy or jax.numpy)
     model.npz      trained weights (self-play iteration 450)
@@ -157,7 +157,7 @@ Round 4, with no dense targets, scored 0.474 on the same test, so the targets lo
 run of each, so the size of the effect is uncertain). Longer training did not help: on held-out games the error
 was lowest after 500 of the 8,000 steps (0.307, picks the winner 88.7% of the time, against 0.314 and 88.5% for round 3
 on the same games) and rose after that (0.341 at the end) while the training loss kept falling. The network memorises
-the games, since every position of a game carries the same result, so the shipped network is the step-500 checkpoint
+the games, since every position of a game carries the same result, so round 5 is the step-500 checkpoint
 and more games, not more steps, is what would help.
 
 *Launch sizes.* A launch is a fraction (a quarter, half, all) of the source's ships. The planner can now also try sizes
@@ -185,14 +185,21 @@ worse (0.278), so the network is using the choice of size, not just the choice o
 with `f:0.9`, `spare` and `cap:1.2:1` in the mix (round 5b) did not do better with them (0.475 against round 3, and it lost
 to round 5, 0.539 for round 5); the gauntlet found nothing to add for it either.
 
-What ships: the round 5 network (`entry/value.npz`) and `spare` (`PW_SIZES=spare`, empty for none), 32 launches. Against the
+Round 5 with `spare` (`PW_SIZES=spare`, empty for none) at 32 launches, against the
 round 3 network at 32 launches, in JAX: 1,197 to 851 of 2,048 plays (0.585). Against the hand-scored planner: 2,017 to 31.
 The numpy planner's launch sizes are checked against the JAX ones in `tests/test_planner.py`.
 
-In the real engine (Kotlin runner, 200 ms limit) the shipped entry beat TeamTitansAgentV3 in 32 of 32 games with no
+In the real engine (Kotlin runner, 200 ms limit) the round 5 entry beat TeamTitansAgentV3 in 32 of 32 games with no
 timeouts, 32 ms a move on average (the round 5 network alone, without `spare`, won 94 of 96 in three runs). Against the
 previous entry (round 3 network, no `spare`) it won 25 of 48 games (0.52), which cannot tell a 0.585 player from an
 even one at this sample size: the JAX test above is the evidence for the gain, and the league is the real test.
+
+**Round 6.** The next round, same recipe, was played by round 5 with `spare` (about 12,000 games, the round 3 network as
+the older opponent), with training continued from round 5 and checked on held-out games every 100 steps. Held-out error
+went from 0.263 (round 5 on these games) to 0.255 at step 600 and wandered after that, so step 600 is kept. Head to head,
+both with `spare` at 32 launches, in JAX: round 6 beat round 5 1,101 to 947 of 2,048 plays (0.538). The entry now ships
+round 6 (`entry/value.npz`) with `spare`. In the real engine it beat TeamTitansAgentV3 in 32 of 32
+games, no timeouts at 200 ms, 19 ms a move on average.
 
 The earlier value network in "A value function trained on game results (did not help)" below was asked a
 different question, which of the policy's own moves is worth most, and the policy's moves were not where

@@ -7,3 +7,4 @@ line; `score` counts a draw as half; `games` is plays, two per map).
 - `match_dA`, `match_dB`: the first head-to-head matches after training (16 launches).
 - `cross_1`..`cross_7`: the follow-up combinations (net against net, sizes on or off, `pair`, 32 launches). Note
   `cross_3` is `extras=pair` (one size per source and target) and `cross_7` is round 5 with `spare` against round 3, 32 launches.
+- `gen_d6`, `train_d6`, `match_d6`: round 6 (games played by round 5 with `spare`; held-out error every 100 steps; round 6 against round 5 at 32 launches).

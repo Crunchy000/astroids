@@ -1,0 +1,1 @@
+{"agent": "mix=0.5", "value": "/content/runs/v6/best.npz", "extras": "spare", "fractions": "", "vs": "value:/content/r5.npz:0.5:32;extras=spare", "top": 32, "horizon": 90, "games": 2048, "score": 0.5376, "wins": 1101, "draws": 0, "losses": 947, "mean_ticks": 986.6, "seconds": 533.5}
