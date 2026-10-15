@@ -154,8 +154,11 @@ Head to head at 16 launches, round 3 against round 5, in JAX:
 | 1,024 (other maps) | 2,048 | 1,111 | 936 | 0.543 |
 
 Round 4, with no dense targets, scored 0.474 on the same test, so the targets look like what made the difference (one
-run of each, so the size of the effect is uncertain). Held-out error on the new games is about the same as
-round 3's (0.341, picks the winner 87.8% of the time), so the error says little about which network plays better.
+run of each, so the size of the effect is uncertain). Longer training did not help: on held-out games the error
+was lowest after 500 of the 8,000 steps (0.307, picks the winner 88.7% of the time, against 0.314 and 88.5% for round 3
+on the same games) and rose after that (0.341 at the end) while the training loss kept falling. The network memorises
+the games, since every position of a game carries the same result, so the shipped network is the step-500 checkpoint
+and more games, not more steps, is what would help.
 
 *Launch sizes.* A launch is a fraction (a quarter, half, all) of the source's ships. The planner can now also try sizes
 worked out from its own projection: `spare` (everything the source can do without, its smallest garrison over the
