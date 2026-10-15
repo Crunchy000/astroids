@@ -186,6 +186,11 @@ What ships: the round 5 network (`entry/value.npz`) and `spare` (`PW_SIZES=spare
 round 3 network at 32 launches, in JAX: 1,197 to 851 of 2,048 plays (0.585). Against the hand-scored planner: 2,017 to 31.
 The numpy planner's launch sizes are checked against the JAX ones in `tests/test_planner.py`.
 
+In the real engine (Kotlin runner, 200 ms limit) the shipped entry beat TeamTitansAgentV3 in 32 of 32 games with no
+timeouts, 32 ms a move on average (the round 5 network alone, without `spare`, won 94 of 96 in three runs). Against the
+previous entry (round 3 network, no `spare`) it won 25 of 48 games (0.52), which cannot tell a 0.585 player from an
+even one at this sample size: the JAX test above is the evidence for the gain, and the league is the real test.
+
 The earlier value network in "A value function trained on game results (did not help)" below was asked a
 different question, which of the policy's own moves is worth most, and the policy's moves were not where
 the gap was.
