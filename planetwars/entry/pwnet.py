@@ -153,11 +153,12 @@ def value_batch(xp, params, heads, planet, glob, valid):
         q = (a @ p[f"l{i}.wq"]).reshape(b, n, heads, dh)
         k = (a @ p[f"l{i}.wk"]).reshape(b, n, heads, dh)
         v = (a @ p[f"l{i}.wv"]).reshape(b, n, heads, dh)
-        att = xp.einsum("bqhd,bkhd->bhqk", q, k) / (dh ** 0.5)
+        q, k, v = q.transpose(0, 2, 1, 3), k.transpose(0, 2, 3, 1), v.transpose(0, 2, 1, 3)  # batched matmuls, not einsum:
+        att = (q @ k) / (dh ** 0.5)                                                             # several times faster in numpy
         att = xp.where(kmask, att, NEG)
         att = xp.exp(att - xp.max(att, axis=-1, keepdims=True))
         att = att / xp.sum(att, axis=-1, keepdims=True)
-        o = xp.einsum("bhqk,bkhd->bqhd", att, v).reshape(b, n, dm)
+        o = (att @ v).transpose(0, 2, 1, 3).reshape(b, n, dm)
         h = h + o @ p[f"l{i}.wo"] + p[f"l{i}.bo"]
         a = _ln(xp, h, p[f"l{i}.ln2.g"], p[f"l{i}.ln2.b"])
         h = h + _relu(xp, a @ p[f"l{i}.w1"] + p[f"l{i}.b1"]) @ p[f"l{i}.w2"] + p[f"l{i}.b2"]

@@ -285,3 +285,33 @@ def test_pair_keeps_one_size_per_move():
         moves = list(zip(np.asarray(b["cand_src"])[fb], np.asarray(b["cand_dst"])[fb]))
         assert len(moves) == len(set(moves)) and len(moves) < fa.sum()
         assert float(a["best"]) == float(b["best"])  # the best launch is the best of its own pair
+
+
+def test_batched_value_matches_one_position_at_a_time():
+    """The entry's fast path (all re-ranked positions' features at once, batched attention) gives the same features and
+    values as pwnet.features and pwnet.value_only on each position separately."""
+    import types
+    import pwnet
+    random.seed(7)
+    params = GameParams(num_planets=24, max_ticks=600)
+    gs = GameStateFactory(params).create_game()
+    model = ForwardModel(gs, params)
+    bots = {p: GreedyHeuristicAgent() for p in (Player.Player1, Player.Player2)}
+    for p, a in bots.items():
+        a.prepare_to_play_as(p, params)
+    for _ in range(150):
+        model.step({p: bots[p].get_action(gs) for p in bots})
+    net, heads = entry_agent.load(str(ENTRY / "value.npz"))
+    net = {k: v.astype(np.float64) for k, v in net.items()}
+    s = entry_agent.arrays(gs, params.transporter_speed, params.max_ticks)
+    for me in (1, 2):
+        c = planner.candidates(s, me, 90, planner.FRACTIONS, None, ("spare",))
+        owners, shipss = list(c["owner"][:12]) + [c["base_owner"]], list(c["ships"][:12]) + [c["base_ships"]]
+        planet, glob = planner.still_features(s, me, owners, shipss, s.tick + 90)
+        fast = planner.value_many(net, heads, s, me, owners, shipss, s.tick + 90)
+        for k, (o, sh) in enumerate(zip(owners, shipss)):
+            s2 = types.SimpleNamespace(**{**vars(s), "owner": o, "ships": sh, "tr_on": np.zeros_like(s.tr_on), "tick": float(s.tick + 90)})
+            p1, g1, _, _ = pwnet.features(np, s2, me)
+            np.testing.assert_allclose(planet[k], p1, rtol=1e-12, atol=1e-12)
+            np.testing.assert_allclose(glob[k], g1, rtol=1e-12, atol=1e-12)
+            np.testing.assert_allclose(fast[k], pwnet.value_only(np, net, heads, p1, g1, s.valid), rtol=1e-9, atol=1e-9)

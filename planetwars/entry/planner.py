@@ -14,8 +14,6 @@ a small penalty for planets with no friendly planet nearby, and a huge value for
 import os
 import time
 
-from types import SimpleNamespace
-
 import numpy as np
 
 import pwnet
@@ -217,17 +215,42 @@ def value_of(params, heads, s, me, owner, ships, tick):
     return float(value_many(params, heads, s, me, [owner], [ships], tick)[0])
 
 
+def still_features(s, me, owners, shipss, tick):
+    """pwnet.features for several positions of the same game with no fleets in flight, all at once: planet [B, N, F]
+    and global [B, G] features (the same numbers as `pwnet.features` on each; checked in tests/test_planner.py)."""
+    o, sh = np.asarray(owners), np.asarray(shipss, dtype=float)
+    valid = s.valid[None, :]
+    vf = np.broadcast_to(valid.astype(float), sh.shape)
+    mine, opp, neu = valid & (o == me), valid & (o == 3 - me), valid & (o == 0)
+    x = (pwnet.WIDTH - s.pos[:, 0]) if me == 2 else s.pos[:, 0]
+    y = (pwnet.HEIGHT - s.pos[:, 1]) if me == 2 else s.pos[:, 1]
+    zero = np.zeros_like(sh)
+    rows = lambda v: np.broadcast_to(v[None, :], sh.shape)  # noqa: E731
+    planet = np.stack([
+        vf, mine.astype(float), opp.astype(float), neu.astype(float), sh / 50.0, np.log1p(sh) / 4.0,
+        rows(s.growth * 10.0), rows(x / pwnet.WIDTH), rows(y / pwnet.HEIGHT),
+        zero, zero, zero, zero, zero, zero, zero, zero, zero,   # fleets: none in flight
+        np.where(mine, 1.0, -1.0) * sh / 50.0, (mine & (sh >= 1.0)).astype(float), rows(s.radius / 40.0),
+    ], axis=-1) * vf[..., None]
+    my_total, opp_total = np.where(mine, sh, 0.0).sum(1), np.where(opp, sh, 0.0).sum(1)
+    my_growth, opp_growth = np.where(mine, s.growth, 0.0).sum(1), np.where(opp, s.growth, 0.0).sum(1)
+    n_valid = max(float(s.valid.sum()), 1.0)
+    b = sh.shape[0]
+    tick, max_ticks = float(tick), float(s.max_ticks)
+    glob = np.stack([
+        np.full(b, tick / max_ticks), np.full(b, (max_ticks - tick) / 1000.0), np.full(b, s.speed / 5.0), np.full(b, n_valid / 30.0),
+        my_total / (my_total + opp_total + 1.0), my_growth / (my_growth + opp_growth + 1e-6),
+        mine.sum(1) / n_valid, opp.sum(1) / n_valid, np.log1p(my_total + opp_total) / 8.0,
+    ], axis=-1)
+    return planet, glob
+
+
 def value_many(params, heads, s, me, owners, shipss, tick):
     """`value_of` for several positions of the same game at once (one batched pass through the network)."""
-    planets, globs = [], []
-    for o, sh in zip(owners, shipss):
-        s2 = SimpleNamespace(**{**vars(s), "owner": o, "ships": sh, "tr_on": np.zeros_like(s.tr_on), "tick": float(tick)})
-        planet, glob, _, _ = pwnet.features(np, s2, me)
-        planets.append(planet)
-        globs.append(glob)
+    planet, glob = still_features(s, me, owners, shipss, tick)
     dt = next(iter(params.values())).dtype
     valid = np.broadcast_to(s.valid, (len(owners), s.valid.shape[0]))
-    return pwnet.value_batch(np, params, heads, np.stack(planets).astype(dt), np.stack(globs).astype(dt), valid)
+    return pwnet.value_batch(np, params, heads, planet.astype(dt), glob.astype(dt), valid)
 
 
 def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=TOP, mix=MIX, budget_ms=BUDGET_MS, extras=()):
