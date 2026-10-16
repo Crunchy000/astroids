@@ -27,6 +27,9 @@ SIZES = tuple(x for x in os.environ.get("PW_SIZES", "spare").split("+") if x)  #
 TOP = int(os.environ.get("PW_TOP", "64"))       # most launches the value network re-ranks (best hand score first)
 BUDGET_MS = float(os.environ.get("PW_BUDGET_MS", "90"))  # stop adding launches to re-rank past this many ms into a move
 CHUNK = 8                                       # launches per pass through the network
+LOOK = os.environ.get("PW_LOOK", "")            # 'OURS:REPLIES': look one reply deep (see `plan_ranked`); empty for none
+LOOK_MS = float(os.environ.get("PW_LOOK_MS", "18"))  # time the look-ahead needs besides scoring its positions
+LOOK_SOURCES = 12                               # the opponent's planets with the most free ships that answers come from
 MIX = float(os.environ.get("PW_MIX", "0.5"))    # weight of the hand score against the value network's
 VALUE = os.environ.get("PW_VALUE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "value.npz"))
 USE_POLICY = os.environ.get("PW_POLICY_CANDIDATE", "0") == "1"  # also try the neural policy's own move
@@ -37,29 +40,48 @@ def arrival_step(dist, radius, speed):
     return np.maximum(np.floor((dist - radius) / speed) + 1.0, 0.0).astype(np.int64)
 
 
+def tick_rule(owner, ships, growth, p1, p2):
+    """One tick of the rules for planets, given the ships each player lands on them in it. Shapes: [M]."""
+    pending = (p1 > 0) | (p2 > 0)
+    neutral = owner == 0
+    net = p1 - p2
+    n_ships = ships - np.abs(net)
+    n_flip = pending & (n_ships < 0)
+    n_owner = np.where(n_flip, np.where(net > 0, 1, 2), owner)
+    n_ships = np.where(pending, np.where(n_flip, -n_ships, n_ships), ships)
+    own_in = np.where(owner == 1, p1, p2)
+    opp_in = np.where(owner == 1, p2, p1)
+    p_ships = ships + growth + np.where(pending, own_in - opp_in, 0.0)
+    p_flip = pending & (p_ships < 0)
+    p_owner = np.where(p_flip, 3 - owner, owner)
+    p_ships = np.where(p_flip, -p_ships, p_ships)
+    return np.where(neutral, n_owner, p_owner), np.where(neutral, n_ships, p_ships)
+
+
 def run(owner, ships, growth, a1, a2):
     """The rules for a planet given the ships each player lands on it at each tick. Shapes: [M] and [H, M]."""
     for k in range(a1.shape[0]):
         p1, p2 = a1[k], a2[k]
-        pending = (p1 > 0) | (p2 > 0)
-        if not pending.any():
+        if not ((p1 > 0) | (p2 > 0)).any():
             ships = np.where(owner == 0, ships, ships + growth)
             continue
-        neutral = owner == 0
-        net = p1 - p2
-        n_ships = ships - np.abs(net)
-        n_flip = pending & (n_ships < 0)
-        n_owner = np.where(n_flip, np.where(net > 0, 1, 2), owner)
-        n_ships = np.where(pending, np.where(n_flip, -n_ships, n_ships), ships)
-        own_in = np.where(owner == 1, p1, p2)
-        opp_in = np.where(owner == 1, p2, p1)
-        p_ships = ships + growth + np.where(pending, own_in - opp_in, 0.0)
-        p_flip = pending & (p_ships < 0)
-        p_owner = np.where(p_flip, 3 - owner, owner)
-        p_ships = np.where(p_flip, -p_ships, p_ships)
-        owner = np.where(neutral, n_owner, p_owner)
-        ships = np.where(neutral, n_ships, p_ships)
+        owner, ships = tick_rule(owner, ships, growth, p1, p2)
     return owner, ships
+
+
+def settle(owner, ships, growth, start, ticks, p1, p2, horizon):
+    """`run` for planets that only see a few landings: the state just before tick `start` ([M]), the ticks of the
+    landings ([M, E], ascending; `horizon` or more for none) and the ships each player lands then ([M, E]). Between
+    landings an owned planet just grows, so only the landings are stepped. Returns owners and ships after `horizon`."""
+    cur = np.asarray(start, dtype=float).copy()
+    for e in range(ticks.shape[1]):
+        t = ticks[:, e]
+        on = t < horizon
+        ships = np.where(on & (owner != 0), ships + growth * (t - cur), ships)
+        o2, s2 = tick_rule(owner, ships, growth, p1[:, e], p2[:, e])
+        owner, ships = np.where(on, o2, owner), np.where(on, s2, ships)
+        cur = np.where(on, t + 1.0, cur)
+    return owner, np.where(owner != 0, ships + growth * (horizon - cur), ships)
 
 
 def parse_size(spec):
@@ -137,13 +159,14 @@ def project(s, me, horizon, ci, cj, cn, a1, a2, base_owner, base_ships, d):
     return all_owner, all_ships
 
 
-def candidates(s, me, horizon=HORIZON, fractions=FRACTIONS, extra=None, extras=()):
+def candidates(s, me, horizon=HORIZON, fractions=FRACTIONS, extra=None, extras=(), keep=False):
     """Every launch the rules allow and where it leaves the map `horizon` ticks on, with the hand score of that.
 
     Returns None when there is nothing to launch from, else a dict: ci, cj, cn (source, target, ships), owner and
     ships ([C, n] after the horizon), score ([C]), and the same for waiting: base_owner, base_ships, base.
     `fractions` are shares of the source's ships; `extras` more sizes (see `parse_size`), dropped where they repeat an
-    earlier size for the same source and target.
+    earlier size for the same source and target. With `keep`, the dict also holds what `replies` needs: the arrivals
+    (a1, a2), distances (d), the score's neighbours (near) and the projection tick by tick (po, ps).
     """
     n = s.ships.shape[0]
     horizon = max(1, min(horizon, int(s.max_ticks - s.tick)))
@@ -157,8 +180,12 @@ def candidates(s, me, horizon=HORIZON, fractions=FRACTIONS, extra=None, extras=(
     if srcs.size == 0:
         return None
     sizes = [parse_size(e) for e in extras]
-    if any(k != "f" for k, _ in sizes):  # sizes worked out from the projection
+    po = ps = None
+    if keep:
         po, ps = base_states(s.owner.copy(), s.ships.copy(), s.growth, a1, a2)
+    if any(k != "f" for k, _ in sizes):  # sizes worked out from the projection
+        if po is None:
+            po, ps = base_states(s.owner.copy(), s.ships.copy(), s.growth, a1, a2)
         k_all = arrival_step(d, s.radius[None, :], s.speed)                      # [n, n] tick a fleet from i lands on j
         kk = np.minimum(k_all, horizon - 1)
         cols = np.arange(n)[None, :]
@@ -195,8 +222,128 @@ def candidates(s, me, horizon=HORIZON, fractions=FRACTIONS, extra=None, extras=(
         return None
     ci, cj, cn = np.concatenate(ci), np.concatenate(cj), np.concatenate(cn)
     all_owner, all_ships = project(s, me, horizon, ci, cj, cn, a1, a2, base_owner, base_ships, d)
-    return dict(ci=ci, cj=cj, cn=cn, owner=all_owner, ships=all_ships, score=score(all_owner, all_ships, s, me, near),
-                base_owner=base_owner, base_ships=base_ships, base=base, horizon=horizon)
+    out = dict(ci=ci, cj=cj, cn=cn, owner=all_owner, ships=all_ships, score=score(all_owner, all_ships, s, me, near),
+               base_owner=base_owner, base_ships=base_ships, base=base, horizon=horizon)
+    if keep:
+        out.update(a1=a1, a2=a2, d=d, near=near, po=po, ps=ps)
+    return out
+
+
+def replies(s, me, c, opts, fractions=FRACTIONS, extras=(), top=4, sources=12):
+    """The opponent's best answers to each of our options, as pwjax.lvalue.make_reply_agent finds them.
+
+    `c` is `candidates(s, me, ..., keep=True)` and `opts` our options as indices into it (-1 for waiting). For each
+    option the opponent's planner runs on the game after our launch: launches from its `sources` planets with the most
+    free ships, of sizes `fractions` and `extras` ('f' and 'spare' kinds), each projected `c["horizon"]` ticks with
+    nobody else acting, ranked by the opponent's hand score. Returns the projected owners and ships after its `top` best
+    answers, [len(opts), top, n], which of those exist ([len(opts), top] bool) and the answers ([len(opts), top, 3]:
+    source, target, ships).
+    """
+    opp, h, n, n_opt = 3 - me, c["horizon"], s.ships.shape[0], len(opts)
+    a1, a2, d, po, ps = c["a1"], c["a2"], c["d"], c["po"], c["ps"]
+    A = np.repeat(np.stack([a1, a2])[None], n_opt, 0)                             # [O, 2, H, n] arrivals after our launch
+    ships0 = np.repeat(s.ships[None].astype(float), n_opt, 0)
+    PO, PS = np.repeat(po[None], n_opt, 0), np.repeat(ps[None], n_opt, 0)       # [O, H, n] before each tick
+    FO, FS = np.repeat(c["base_owner"][None], n_opt, 0), np.repeat(c["base_ships"][None], n_opt, 0)
+    oo, pp = [], []
+    for o, k in enumerate(opts):
+        if k >= 0:
+            i, j, x = int(c["ci"][k]), int(c["cj"][k]), float(c["cn"][k])
+            ships0[o, i] -= x
+            kk = int(arrival_step(d[i, j], s.radius[j], s.speed))
+            if kk < h:
+                A[o, me - 1, kk, j] += x
+            oo += [o, o]
+            pp += [i, j]
+    if oo:  # only our source and target differ from the nobody-launches projection without our launch
+        oo, pp = np.array(oo), np.array(pp)
+        q1, q2 = A[oo, 0, :, pp].T, A[oo, 1, :, pp].T                                # [H, m]
+        qo, qs = base_states(s.owner[pp].copy(), ships0[oo, pp], s.growth[pp], q1, q2)
+        PO[oo, :, pp], PS[oo, :, pp] = qo.T, qs.T
+        FO[oo, pp], FS[oo, pp] = run(qo[-1], qs[-1], s.growth[pp], q1[-1:], q2[-1:])
+    free = s.valid & (s.owner == opp) & ~s.tr_on & (s.ships >= 1.0)
+    src = np.argsort(-np.where(free, s.ships, -1.0), kind="stable")[:sources]
+    src = src[free[src]]
+    found, acts = np.zeros((n_opt, top), bool), np.zeros((n_opt, top, 3))
+    out_o, out_s = np.repeat(FO[:, None], top, 1), np.repeat(FS[:, None], top, 1)
+    if src.size == 0:
+        return out_o, out_s, found, acts
+    # launch sizes [O, S, F]
+    sizes = [np.broadcast_to(np.maximum(1.0, np.floor(s.ships[src] * f)), (n_opt, src.size)) for f in fractions]
+    kept = (PO[:, :, src] == opp).all(1)
+    spare = np.where(kept, np.floor(PS[:, :, src].min(1)), 0.0)                  # [O, S]
+    for kind, v in (parse_size(e) for e in extras):
+        assert kind in ("f", "spare"), kind
+        sizes.append(np.floor(spare * v[0]) if kind == "spare" else np.broadcast_to(np.maximum(1.0, np.floor(s.ships[src] * v[0])), (n_opt, src.size)))
+    x = np.stack(sizes, -1)                                                       # [O, S, F]
+    ok = (x >= 1.0) & (x <= s.ships[src][None, :, None])
+    for f in range(len(fractions), x.shape[-1]):
+        ok[..., f] &= ~(x[..., :f] == x[..., f:f + 1]).any(-1)
+    cand = ok[..., None] & s.valid[None, None, None, :] & (np.arange(n)[None, None, None, :] != src[None, :, None, None])
+    o_c, s_c, f_c, t_c = np.nonzero(cand)                                         # [C] option, source, size, target
+    if o_c.size == 0:
+        return out_o, out_s, found, acts
+    i_c, x_c = src[s_c], x[o_c, s_c, f_c]
+    # the target: as projected until the fleet lands, then stepped through its landings and the later ones
+    k_c = arrival_step(d[i_c, t_c], s.radius[t_c], s.speed)
+    lands = k_c < h
+    kc = np.minimum(k_c, h - 1)
+    busy = (A[:, 0] + A[:, 1]) > 0                                                # [O, H, n] ticks with landings
+    e_max = max(int(busy.sum(1).max()), 1)
+    ticks = np.where(busy, np.arange(h)[None, :, None], h).transpose(0, 2, 1)     # [O, n, H]
+    ticks = np.sort(ticks, -1)[..., :e_max]                                       # [O, n, E] landing ticks, padded
+    later = ticks[o_c, t_c]                                                       # [C, E]
+    later = np.sort(np.where(later > kc[:, None], later, h), -1)
+    ev = np.concatenate([kc[:, None], later], 1)                                  # [C, E + 1]
+    evc = np.minimum(ev, h - 1)
+    live = ev < h
+    p1 = np.where(live, A[o_c[:, None], 0, evc, t_c[:, None]], 0.0)
+    p2 = np.where(live, A[o_c[:, None], 1, evc, t_c[:, None]], 0.0)
+    (p1 if opp == 1 else p2)[:, 0] += x_c
+    t_own, t_sh = settle(PO[o_c, kc, t_c], PS[o_c, kc, t_c], s.growth[t_c], kc, ev, p1, p2, h)
+    t_own, t_sh = np.where(lands, t_own, FO[o_c, t_c]), np.where(lands, t_sh, FS[o_c, t_c])
+    # the source: fewer ships from the start, through the landings on it
+    so, ss, sf = np.nonzero(ok)
+    si = src[ss]
+    sev = ticks[so, si]                                                           # [B, E]
+    sevc = np.minimum(sev, h - 1)
+    q1 = np.where(sev < h, A[so[:, None], 0, sevc, si[:, None]], 0.0)
+    q2 = np.where(sev < h, A[so[:, None], 1, sevc, si[:, None]], 0.0)
+    s_own, s_sh = settle(s.owner[si].copy(), ships0[so, si] - x[so, ss, sf], s.growth[si], np.zeros(so.size), sev, q1, q2, h)
+    row = np.full(ok.shape, -1)
+    row[so, ss, sf] = np.arange(so.size)
+    r_c = row[o_c, s_c, f_c]
+    # the opponent's hand score of every answer (see `score`), from the projection without it and the two planets it
+    # changes: per planet the score counts +-(1.5 ships + 20 growth + 5), less 2 growth for each lone planet
+    g, near = s.growth, c["near"]
+    s_own, s_sh = s_own[r_c], s_sh[r_c]
+    side = lambda o: np.where(o == opp, 1.0, np.where(o == me, -1.0, 0.0))  # noqa: E731
+    per = side(FO) * (1.5 * FS + 20.0 * g + 5.0)                                  # [O, n]
+    sc = (per.sum(1)[o_c] - per[o_c, t_c] - per[o_c, i_c] + side(t_own) * (1.5 * t_sh + 20.0 * g[t_c] + 5.0)
+          + side(s_own) * (1.5 * s_sh + 20.0 * g[i_c] + 5.0))
+    mine, theirs = FO == opp, FO == me
+    d_t, d_s = (t_own == opp) * 1.0 - mine[o_c, t_c], (s_own == opp) * 1.0 - mine[o_c, i_c]
+    n_mine = mine.sum(1)[o_c] + d_t + d_s
+    n_theirs = theirs.sum(1)[o_c] + (t_own == me) * 1.0 - theirs[o_c, t_c] + (s_own == me) * 1.0 - theirs[o_c, i_c]
+    rows = np.arange(o_c.size)
+    m = mine[o_c]
+    m[rows, t_c], m[rows, i_c] = t_own == opp, s_own == opp
+    friends = (mine * 1.0 @ near.T)[o_c] + near[t_c] * d_t[:, None] + near[i_c] * d_s[:, None]
+    lone = (m & (friends == 0)) @ g
+    sc = (sc - 2.0 * np.where(n_mine > 1, lone, 0.0) + 5.0 * (n_mine - n_theirs)
+          + np.where((n_theirs == 0) & (n_mine > 0), 10000.0, 0.0) - np.where((n_mine == 0) & (n_theirs > 0), 10000.0, 0.0))
+    # the opponent's best `top` for each option, and where they leave the map
+    order = np.lexsort((-sc, o_c))                                                # by option, then best first (stable)
+    first = np.searchsorted(o_c[order], np.arange(n_opt))
+    count = np.bincount(o_c, minlength=n_opt)
+    for o in range(n_opt):
+        k = min(top, int(count[o]))
+        pick, r = order[first[o]:first[o] + k], np.arange(k)
+        out_o[o, r, t_c[pick]], out_s[o, r, t_c[pick]] = t_own[pick], t_sh[pick]
+        out_o[o, r, i_c[pick]], out_s[o, r, i_c[pick]] = s_own[pick], s_sh[pick]
+        found[o, :k] = True
+        acts[o, :k] = np.stack([i_c[pick], t_c[pick], x_c[pick]], -1)
+    return out_o, out_s, found, acts
 
 
 def plan(s, me, horizon=HORIZON, fractions=FRACTIONS, extra=None, extras=()):
@@ -253,45 +400,77 @@ def value_many(params, heads, s, me, owners, shipss, tick):
     return pwnet.value_batch(np, params, heads, planet.astype(dt), glob.astype(dt), valid)
 
 
-def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=TOP, mix=MIX, budget_ms=BUDGET_MS, extras=()):
+def totals_of(params, heads, s, me, owners, shipss, hand, tick, mix):
+    """The ranking score of projected positions: (1 - mix) * value + mix * tanh(hand / 200), and 10 more (less) where
+    the opponent (we) has no planet left."""
+    owners = np.asarray(owners)
+    v = value_many(params, heads, s, me, list(owners), list(shipss), tick)
+    won, lost = ~(owners == 3 - me).any(-1), ~(owners == me).any(-1)
+    return ((1.0 - mix) * np.asarray(v, float) + mix * np.tanh(np.asarray(hand) / 200.0)
+            + np.where(won & ~lost, 10.0, 0.0) - np.where(lost & ~won, 10.0, 0.0))
+
+
+def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=TOP, mix=MIX, budget_ms=BUDGET_MS, extras=(),
+                look=LOOK, look_ms=LOOK_MS):
     """Like `plan`, but the best launches by hand score (and waiting) are re-ranked by the value network, mixed with
     the hand score as (1 - mix) * value + mix * tanh(hand / 200). Launches go through the network eight at a time,
     best hand score first, until `top` have been seen or `budget_ms` (counted from the start of this call) would be
-    exceeded by another batch, so a slow machine looks at fewer. Returns (src, dst, ships) or None to wait."""
+    exceeded by another batch, so a slow machine looks at fewer. Returns (src, dst, ships) or None to wait.
+
+    With `look` = 'OURS:REPLIES' the ranking looks one reply deep, as pwjax.lvalue.make_reply_agent does: the best OURS
+    options so far are each worth the worst of their own score and the scores after the opponent's REPLIES best answers
+    by its hand score (see `replies`). Re-ranking then stops early enough to leave time for that: `look_ms` plus, for
+    scoring the OURS * REPLIES positions, the slowest batch of eight so far for every eight of them. If less time is
+    left than that, fewer options look ahead (none if fewer than two would)."""
     started = time.perf_counter()
-    c = candidates(s, me, horizon, fractions, None, extras)
+    ours, n_rep = (int(x) for x in look.split(":")) if look else (0, 0)
+    c = candidates(s, me, horizon, fractions, None, extras, keep=ours > 0)
     if c is None:
         return None
     order = np.argsort(-c["score"], kind="stable")[:top]
     tick = s.tick + c["horizon"]
-    best_total, best_k, took = -np.inf, None, 0.0
+    seen_k, seen_t, took = [], [], 0.0
     for lo in range(0, len(order), CHUNK):
-        if lo and (time.perf_counter() - started) * 1000 + took > budget_ms:
+        reserve = (look_ms + took * ours * n_rep / CHUNK) if ours else 0.0
+        if lo and (time.perf_counter() - started) * 1000 + took + reserve > budget_ms:
             break
         t0 = time.perf_counter()
         idx = order[lo:lo + CHUNK]
         owners = [c["owner"][k] for k in idx] + ([c["base_owner"]] if lo == 0 else [])
         shipss = [c["ships"][k] for k in idx] + ([c["base_ships"]] if lo == 0 else [])
         hand = np.concatenate([c["score"][idx], [c["base"]] if lo == 0 else []])
-        v = value_many(params, heads, s, me, owners, shipss, tick)
-        for k, o in enumerate(owners):
-            won, lost = not (o == 3 - me).any(), not (o == me).any()
-            total = ((1.0 - mix) * float(v[k]) + mix * np.tanh(hand[k] / 200.0)
-                     + (10.0 if won and not lost else 0.0) - (10.0 if lost and not won else 0.0))
-            if total > best_total:
-                best_total, best_k = total, (None if k == len(idx) else int(idx[k]))
+        seen_t.append(totals_of(params, heads, s, me, owners, shipss, hand, tick, mix))
+        seen_k += [int(k) for k in idx] + ([-1] if lo == 0 else [])
         took = max(took, (time.perf_counter() - t0) * 1000)
-    if best_k is None:
+    seen_k, seen_t = np.array(seen_k), np.concatenate(seen_t)
+    best = int(np.argmax(seen_t))  # the first best on a tie, as before
+    if ours and took > 0:
+        left = budget_ms - (time.perf_counter() - started) * 1000 - look_ms
+        ours = min(ours, int(left / (took / CHUNK)) // n_rep)
+    if ours >= 2:
+        pick = np.argsort(-seen_t, kind="stable")[:ours]
+        opts = seen_k[pick]
+        r_own, r_sh, found, _ = replies(s, me, c, opts, fractions, extras, n_rep, LOOK_SOURCES)
+        worst = seen_t[pick].copy()
+        if found.any():
+            o_idx, r_idx = np.nonzero(found)
+            ro, rs = r_own[o_idx, r_idx], r_sh[o_idx, r_idx]
+            r_tot = totals_of(params, heads, s, me, ro, rs, score(ro, rs, s, me, c["near"]), tick, mix)
+            np.minimum.at(worst, o_idx, r_tot)
+        best = int(pick[int(np.argmax(worst))])
+    k = int(seen_k[best])
+    if k < 0:
         return None
-    return int(c["ci"][best_k]), int(c["cj"][best_k]), float(c["cn"][best_k])
+    return int(c["ci"][k]), int(c["cj"][k]), float(c["cn"][k])
 
 
 class PlannerAgent(NeuralAgent):
     """Tries every launch each tick (see the module docstring)."""
 
-    def __init__(self, horizon=HORIZON, fractions=FRACTIONS, use_policy=USE_POLICY, value=VALUE, top=TOP, mix=MIX, budget_ms=BUDGET_MS, extras=SIZES):
+    def __init__(self, horizon=HORIZON, fractions=FRACTIONS, use_policy=USE_POLICY, value=VALUE, top=TOP, mix=MIX, budget_ms=BUDGET_MS, extras=SIZES,
+                 look=LOOK):
         super().__init__()
-        self.horizon, self.fractions, self.use_policy, self.extras = horizon, tuple(fractions), use_policy, tuple(extras)
+        self.horizon, self.fractions, self.use_policy, self.extras, self.look = horizon, tuple(fractions), use_policy, tuple(extras), look
         self.value, self.top, self.mix, self.budget_ms = None, top, mix, budget_ms
         if value and value != "off" and os.path.exists(value):
             params, heads = load(value)  # ranks the planner's best launches (single precision: twice as fast, same picks)
@@ -310,7 +489,7 @@ class PlannerAgent(NeuralAgent):
                 extra = [(i, j, a)] if i >= 0 else None
             if self.value is not None and extra is None:
                 try:
-                    best = plan_ranked(s, me, *self.value, self.horizon, self.fractions, self.top, self.mix, self.budget_ms, self.extras)
+                    best = plan_ranked(s, me, *self.value, self.horizon, self.fractions, self.top, self.mix, self.budget_ms, self.extras, self.look)
                 except Exception as e:  # fall back to the hand-written score
                     print("PlannerAgent value error:", repr(e), flush=True)
                     best = plan(s, me, self.horizon, self.fractions, extras=self.extras)
