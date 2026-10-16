@@ -134,9 +134,16 @@ continued from round 3) did not improve on round 3: head to head at 16 launches 
 0.474), so round 4 was not used. The gain from here came from looking at more launches, not from more rounds; the next
 section, which adds the dense targets, is the round that did help.
 
-The entry now re-ranks up to 32 launches. Time is the limit (about 1.5 ms per launch on one CPU core), so it works
-through them in chunks of 8, best hand score first, and stops when 90 ms are spent, then picks the best seen so far.
-Against TeamTitansAgentV3 in the Kotlin runner: 32 of 32 games, 0 timeouts at 200 ms, 21 ms a move on average.
+The entry re-ranked up to 32 launches at first. Time is the limit, so it works through them in chunks of 8, best hand
+score first, and stops when 90 ms are spent, then picks the best seen so far. Against TeamTitansAgentV3 in the Kotlin
+runner: 32 of 32 games, 0 timeouts at 200 ms, 21 ms a move on average.
+
+Later, with the round 6 network and `spare`, more launches still paid (JAX, 1,024 plays each, against itself at 32):
+48 launches scored 0.562 and 64 scored 0.592, more than a round of training gives. To afford them, the entry now works
+out the features of all re-ranked positions at once and does attention with batched matrix products instead of
+`einsum`, about twice as fast (on a 30-planet map, 64 launches in about 60 ms instead of 150 ms). It now re-ranks up to
+64 (`PW_TOP`). In a timing run over 768 moves on league maps, one core: 48 ms a move on average, slowest 87 ms.
+Against TeamTitansAgentV3 in the Kotlin runner at 64 launches: 32 of 32 games, no timeouts, 23 ms a move on average.
 
 **Dense targets, and launch sizes.** Two changes, tried together on an A100 (about 24 Colab compute units in all).
 
