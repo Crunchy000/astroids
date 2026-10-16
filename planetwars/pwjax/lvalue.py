@@ -122,6 +122,42 @@ def make_value_agent(params, heads, sources=12, horizon=90, top=8, mix=0.0, scal
     return act
 
 
+def make_reply_agent(params, heads, sources=12, horizon=90, top=8, mix=0.0, scale=200.0, wait=True,
+                     fractions=jplanner.FRACTIONS, extras=(), ours=8, replies=3, weight=1.0):
+    """make_value_agent, looking one reply deep. The planner's projection assumes nobody launches anything more, so it
+    cannot see a counter-attack on a planet a launch has just emptied. Here the `ours` best options by the mixed score
+    (waiting included) are each played on a copy of the game, the opponent's planner finds its `replies` best answers
+    to each by its own hand score, and the network scores the position after each answer. An option is then worth
+    weight * (its worst case, the opponent not answering included) + (1 - weight) * (its plain score)."""
+    plan = jplanner.make_planner(sources, horizon, top, fractions, extras)
+    plan_r = jplanner.make_planner(sources, horizon, replies, fractions, extras)
+
+    def act(s, me, key):
+        del key
+        h = jnp.maximum(jnp.minimum(horizon, s.max_ticks - s.tick), 1)
+        out, owners, ships, hand, ok, v = options(plan, s, me, h, top, params, heads)
+        ok = ok & jnp.concatenate([jnp.ones(top, bool), jnp.array([wait])])
+        plain = jnp.where(ok, totals(s, me, owners, hand, v, mix, scale), -jnp.inf)
+        first, cand = jax.lax.top_k(plain, ours)                                   # [ours]
+        usable = jnp.isfinite(first)
+        launch = (cand < top) & usable
+        j = jnp.minimum(cand, top - 1)
+        acts = (jnp.where(launch, out["cand_src"][j], -1).astype(jnp.int32),
+                jnp.where(launch, out["cand_dst"][j], -1).astype(jnp.int32),
+                jnp.where(launch, out["cand_ships"][j], 0.0).astype(s.ships.dtype))
+        after = jax.vmap(lambda a: env._launch(s, me, a))(acts)
+        r = jax.vmap(lambda st: plan_r(st, 3 - me, h))(after)
+        ro, rs = r["cand_owner"], r["cand_ships_final"]                            # [ours, replies, N]
+        r_ok = jnp.isfinite(r["cand_score"])
+        r_hand = jplanner.score_final(ro, rs, s, me, jplanner.near_matrix(s))
+        r_v = jax.vmap(lambda o, sh: net_values(params, heads, s, me, o, sh, h))(ro, rs)
+        r_tot = totals(s, me, ro, r_hand, r_v, mix, scale)
+        worst = jnp.minimum(first, jnp.min(jnp.where(r_ok, r_tot, jnp.inf), 1))
+        k = jnp.argmax(jnp.where(usable, weight * worst + (1.0 - weight) * first, -jnp.inf))
+        return tuple(x[k] for x in acts)
+    return act
+
+
 # ---------------------------------------------------------------- game generation
 
 def make_gen(cfg, n_envs, params=None, heads=None, has2=False, heads2=None):
@@ -491,6 +527,13 @@ def cmd_match(cfg):
         runs = [(f"mix={m}", make_value_agent(params, heads, cfg.sources, cfg.horizon, cfg.top, float(m), wait=not cfg.no_wait,
                                               fractions=fractions, extras=extras))
                 for m in cfg.mix.split(",")]
+        if cfg.reply:  # OURS:REPLIES[:WEIGHT], comma separated: look one opponent reply deep (see make_reply_agent)
+            runs = []
+            for spec in cfg.reply.split(","):
+                o, rp, *w = spec.split(":")
+                runs.append((f"mix={cfg.mix};reply={spec}", make_reply_agent(
+                    params, heads, cfg.sources, cfg.horizon, cfg.top, float(cfg.mix), wait=not cfg.no_wait,
+                    fractions=fractions, extras=extras, ours=int(o), replies=int(rp), weight=float(w[0]) if w else 1.0)))
     for opp in cfg.vs.split(","):
         fb = opponent(opp)
         for name, agent in runs:
@@ -554,6 +597,8 @@ def main(argv=None):
     m.add_argument("--sources", type=int, default=12)
     m.add_argument("--horizon", type=int, default=90)
     m.add_argument("--no-wait", action="store_true")
+    m.add_argument("--reply", default="", help="OURS:REPLIES[:WEIGHT], comma separated: look one opponent reply deep "
+                   "(see make_reply_agent); one run each, at the single --mix")
     m.add_argument("--extras", default="", help="launch sizes beyond the fractions for the tested agent, '+' separated")
     m.add_argument("--fractions", default="", help="fractions of the source's ships for the tested agent")
     m.add_argument("--chunk", type=int, default=250)

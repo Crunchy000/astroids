@@ -128,12 +128,14 @@ def make_planner(sources=12, horizon=90, top=8, fractions=FRACTIONS, extras=()):
       spare:X a fraction X of that
       f:X     a fraction X of the source's ships
     Duplicates of an earlier size for the same source and target are dropped. The extra 'pair' (not a size) keeps only
-    the best size, by hand score, for each source and target, so the `top` slots go to different moves.
+    the best size, by hand score, for each source and target, so the `top` slots go to different moves. The extra 'duo'
+    adds two-fleet attacks: two sources each send their `spare` ships to one target, the further one now and the other a
+    tick later, scored as if both go (the move played is the first launch).
     Keys: action (src, dst, ships), best, base (scores of the best move and of waiting), cand_src/dst/ships/score [top],
     cand_owner/cand_ships [top, N] (projected positions), base_owner/base_ships [N].
     """
-    per_pair = "pair" in extras
-    extras = tuple(parse_size(e) for e in extras if e != "pair")
+    per_pair, duo = "pair" in extras, "duo" in extras
+    extras = tuple(parse_size(e) for e in extras if e not in ("pair", "duo"))
     nf = len(fractions) + len(extras)
 
     def plan(s: env.State, me, h_eff):
@@ -150,7 +152,7 @@ def make_planner(sources=12, horizon=90, top=8, fractions=FRACTIONS, extras=()):
         ships_src = s.ships[src]
         amt = jnp.maximum(1.0, jnp.floor(ships_src[:, None] * fr[None, :]))        # [K, F]
         amts = [jnp.broadcast_to(amt[:, f, None], (sources, n)) for f in range(len(fractions))]
-        if any(k != "f" for k, _ in extras):
+        if duo or any(k != "f" for k, _ in extras):
             po, ps = base_states(s, a, h_eff, horizon)
             kk = jnp.clip(k_c, 0, horizon - 1)
             cols = jnp.arange(n)[None, :]
@@ -210,13 +212,47 @@ def make_planner(sources=12, horizon=90, top=8, fractions=FRACTIONS, extras=()):
             sc = jnp.where(jnp.arange(nf)[None, :, None] == best_f[:, None, :], sc, -jnp.inf)
         base = score_final(bo, bs, s, me, near)
         flat = sc.reshape(-1)
-        vals, pick = jax.lax.top_k(flat, top)
         flat_i, flat_j, flat_n = ci.reshape(-1), cj.reshape(-1), cn.reshape(-1)
+        fo, fs = f_owner.reshape(-1, n), f_ships.reshape(-1, n)
+        if duo:
+            # two sources each send what they can spare to one target: the further one now (the move played), the other
+            # a tick later, so that they land close together. Scored as if both go; next tick the planner sees the first
+            # fleet in flight, so the second launch then scores on its own.
+            give = jnp.where(src_ok & (spare >= 1.0), spare, 0.0)                 # [K]
+            ok2 = ((k_c[:, None, :] >= k_c[None, :, :]) & ~jnp.eye(sources, dtype=bool)[:, :, None]
+                   & (give[:, None, None] >= 1.0) & (give[None, :, None] >= 1.0) & s.valid[None, None, :]
+                   & (src[:, None, None] != idx) & (src[None, :, None] != idx))     # [K(now), K(next tick), N]
+            k1 = jnp.broadcast_to(k_c[:, None, :], ok2.shape)
+            k2 = jnp.broadcast_to(k_c[None, :, :] + 1, ok2.shape)
+
+            def step2(c, x):
+                (to, ts), (go_, gs) = c
+                k, ak = x
+                on = k < h_eff
+                add = jnp.where(ok2 & (k1 == k), give[:, None, None], 0.0) + jnp.where(ok2 & (k2 == k), give[None, :, None], 0.0)
+                nto, nts = planet_step(to, ts, s.growth, ak[0] + jnp.where(me == 1, add, 0.0), ak[1] + jnp.where(me == 2, add, 0.0))
+                ngo, ngs = planet_step(go_, gs, s.growth[src], ak[0][src], ak[1][src])
+                sel = lambda new, old: jnp.where(on, new, old)  # noqa: E731
+                return ((sel(nto, to), sel(nts, ts)), (sel(ngo, go_), sel(ngs, gs))), None
+
+            init2 = ((jnp.broadcast_to(s.owner, ok2.shape), jnp.broadcast_to(s.ships, ok2.shape)), (s.owner[src], ships_src - give))
+            ((to, ts), (go_, gs)), _ = jax.lax.scan(step2, init2, (jnp.arange(horizon), a))
+            is_t = idx[None, None, None, :] == idx[None, None, :, None]           # [K, K, target, planet]
+            is_p = idx[None, None, None, :] == src[:, None, None, None]
+            is_q = idx[None, None, None, :] == src[None, :, None, None]
+            d_owner = jnp.where(is_t, to[..., None], jnp.where(is_p, go_[:, None, None, None], jnp.where(is_q, go_[None, :, None, None], bo)))
+            d_ships = jnp.where(is_t, ts[..., None], jnp.where(is_p, gs[:, None, None, None], jnp.where(is_q, gs[None, :, None, None], bs)))
+            sc2 = jnp.where(ok2, score_final(d_owner, d_ships, s, me, near), -jnp.inf)
+            flat = jnp.concatenate([flat, sc2.reshape(-1)])
+            flat_i = jnp.concatenate([flat_i, jnp.broadcast_to(src[:, None, None], ok2.shape).reshape(-1)])
+            flat_j = jnp.concatenate([flat_j, jnp.broadcast_to(idx[None, None, :], ok2.shape).reshape(-1)])
+            flat_n = jnp.concatenate([flat_n, jnp.broadcast_to(give[:, None, None], ok2.shape).reshape(-1)])
+            fo, fs = jnp.concatenate([fo, d_owner.reshape(-1, n)]), jnp.concatenate([fs, d_ships.reshape(-1, n)])
+        vals, pick = jax.lax.top_k(flat, top)
         best = vals[0]
         go = best > base + 2e-3   # a launch that changes nothing is no reason to launch (float32 noise is ~1e-3)
         action = (jnp.where(go, flat_i[pick[0]], -1).astype(jnp.int32), jnp.where(go, flat_j[pick[0]], -1).astype(jnp.int32),
                   jnp.where(go, flat_n[pick[0]], 0.0).astype(dt))
-        fo, fs = f_owner.reshape(-1, n), f_ships.reshape(-1, n)
         return dict(action=action, best=best, base=base, cand_src=flat_i[pick], cand_dst=flat_j[pick], cand_ships=flat_n[pick],
                     cand_score=vals, cand_owner=fo[pick], cand_ships_final=fs[pick], base_owner=bo, base_ships=bs)
 
