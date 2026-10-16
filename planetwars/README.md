@@ -2,7 +2,8 @@
 
 An entry for Simon Lucas's [Planet Wars RTS](https://simonlucas.github.io/planet-wars-rts/) league.
 The entry served by default is an all-moves planner (`entry/planner.py`) whose best few launches are
-re-ranked by a small network trained on the results of planner games (`entry/value.npz`). Without that
+re-ranked by a small network trained on the results of planner games (`entry/value.npz`), checking the opponent's
+best answers to its eight best options before it picks one. Without that
 file, or with `PW_VALUE=off`, it ranks launches by a hand-written score alone. A neural network
 trained by self-play on a GPU is also in the repo (`PW_AGENT=neural`); the planner beats it in 57 of 60
 games. The game itself is untouched: we port its rules to JAX so thousands of games run in parallel,
@@ -207,6 +208,40 @@ went from 0.263 (round 5 on these games) to 0.255 at step 600 and wandered after
 both with `spare` at 32 launches, in JAX: round 6 beat round 5 1,101 to 947 of 2,048 plays (0.538). The entry now ships
 round 6 (`entry/value.npz`) with `spare`. In the real engine it beat TeamTitansAgentV3 in 32 of 32
 games, no timeouts at 200 ms, 19 ms a move on average.
+
+**Looking one reply ahead.** The projection assumes nobody launches anything more, so the planner cannot see a
+counter-attack on a planet it has just emptied. Now the eight best options by the mixed score (waiting included) are
+each played on a copy of the game, the opponent's planner finds its four best answers by its own hand score (launches
+from its 12 planets with the most free ships, same sizes), and the network scores the position after each answer. An
+option is worth the worst of these and its own score, and the best by that is played (`PW_LOOK=8:4`, the default;
+empty turns it off). Head to head in JAX (`lvalue match --reply`, 512 league maps from both sides, round 6 network
+with `spare`), against the same planner without it at 64 launches:
+
+| Look-ahead | Launches re-ranked | Score of 1,024 |
+|---|---|---|
+| 8 options, 4 answers each | 64 | 0.584 |
+| 16 options, 4 answers | 64 | 0.570 |
+| 8 options, 8 answers | 64 | 0.558 |
+| 8 options, 4 answers, worst case averaged with the plain score | 64 | 0.550 |
+| 8 options, only the opponent's best answer | 64 | 0.530 |
+| 8 options, 4 answers | 48 | 0.548 |
+| 8 options, 4 answers | 32 | 0.474 |
+
+Looking ahead is worth about as much as doubling the launches re-ranked, so the two compete for the time. The entry
+finds the answers without stepping copies of the game (`replies` in `entry/planner.py`): a launch changes the
+projection only on its two planets, an answer's planets are stepped only at the ticks fleets land on them, and an
+answer's hand score is worked out from the two planets it changes. That takes about 4 ms and finds the same answers as
+the JAX version (scores checked on 189 options). Scoring the 32 answered positions takes most of the time, so
+re-ranking stops early enough to leave room for it, and fewer options look ahead when time is short. On league maps,
+one core: 66 ms a move on average, slowest 88 ms; maps of 22 or more planets re-rank about 50 launches instead of 64,
+smaller ones all of them. In the real engine the entry with look-ahead beat the entry without it in 21 of 32 games,
+and TeamTitansAgentV3 in 63 of 64 (two series at once, no timeouts, slowest move 102 ms).
+
+Two more ideas did not make the cut. Two-fleet attacks (`duo` in `pwjax/planner.py`: two planets send what they can
+spare to one target a tick apart, scored as if both go) lost 374 to 650 against the planner without them: the first
+fleet goes out on the promise of a second that the next tick's ranking often does not send. Re-ranking 128 launches
+instead of 64 scored 0.533 in JAX (96: 0.530), but under load moves took up to 150 ms and one in 64 games timed out.
+A seventh round of training (same recipe, played by round 6) lost to round 6 (975 to 1,073) and was not used.
 
 The earlier value network in "A value function trained on game results (did not help)" below was asked a
 different question, which of the policy's own moves is worth most, and the policy's moves were not where

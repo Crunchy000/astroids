@@ -183,7 +183,35 @@ def test_numpy_value_ranking_matches_the_jax_agent():
                 v_np = planner.value_of(np_params, 4, ns, me, ns.owner, ns.ships, 77.0)
                 v_jx = float(policy.apply(params, 4, lvalue.fresh(s, s.owner, s.ships, jnp.int32(77)), me)[2])
                 assert abs(v_np - v_jx) < 1e-3, (v_np, v_jx)
-                want = planner.plan_ranked(ns, me, np_params, 4, 90, planner.FRACTIONS, 8, 0.5)
+                want = planner.plan_ranked(ns, me, np_params, 4, 90, planner.FRACTIONS, 8, 0.5, look="")
+                got = tuple(np.asarray(x) for x in agent(s, me, k1))
+                total += 1
+                same += int((want is None and got[0] < 0) or (want is not None and (int(got[0]), int(got[1])) == want[:2]))
+        s = env.step(s, policy.sample_t(params, 4, s, 1, k1, 1.0, 0.5), policy.sample_t(params, 4, s, 2, k2, 1.0, 0.5))
+    assert total >= 20 and same >= 0.85 * total, (same, total)
+
+
+def test_look_ahead_picks_like_the_jax_reply_agent(monkeypatch):
+    """With the look-ahead on, the entry picks what pwjax.lvalue.make_reply_agent picks (ties aside)."""
+    import jax
+    import jax.numpy as jnp
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+    from pwjax import env, lvalue, maps, policy
+
+    monkeypatch.setattr(planner, "LOOK_SOURCES", 32)  # the JAX agent's opponent uses its `sources` too
+    params = policy.init(jax.random.PRNGKey(2))
+    np_params = {k: np.asarray(v, dtype=np.float64) for k, v in params.items()}
+    agent = jax.jit(lvalue.make_reply_agent(params, 4, 32, 90, 8, mix=0.5, extras=("spare",), ours=8, replies=4))
+    bank = {k: jnp.asarray(v) for k, v in maps.make_bank(1, seed=9, param_fn=maps.cog2026_params).items()}
+    s = env.from_bank(bank, 0)
+    key = jax.random.PRNGKey(1)
+    same = total = 0
+    for t in range(150):
+        key, k1, k2 = jax.random.split(key, 3)
+        if t % 10 == 5:
+            for me in (1, 2):
+                ns = _numpy_view(s)
+                want = planner.plan_ranked(ns, me, np_params, 4, 90, planner.FRACTIONS, 8, 0.5, 1e9, ("spare",), "8:4")
                 got = tuple(np.asarray(x) for x in agent(s, me, k1))
                 total += 1
                 same += int((want is None and got[0] < 0) or (want is not None and (int(got[0]), int(got[1])) == want[:2]))

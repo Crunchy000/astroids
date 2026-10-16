@@ -1,5 +1,6 @@
 """A planner that tries every launch: project each one forward with nobody else acting, keep the best.
-(With a value network on disk, the best few by this score are re-ranked by it; see `plan_ranked`.)
+(With a value network on disk, the best few by this score are re-ranked by it, looking one opponent reply ahead; see
+`plan_ranked`.)
 
 Each tick every (source, target, amount) the rules allow is scored by where the game stands `HORIZON` ticks
 later if nothing else is launched by either side. With no new launches, every planet's future depends only on
@@ -27,7 +28,7 @@ SIZES = tuple(x for x in os.environ.get("PW_SIZES", "spare").split("+") if x)  #
 TOP = int(os.environ.get("PW_TOP", "64"))       # most launches the value network re-ranks (best hand score first)
 BUDGET_MS = float(os.environ.get("PW_BUDGET_MS", "90"))  # stop adding launches to re-rank past this many ms into a move
 CHUNK = 8                                       # launches per pass through the network
-LOOK = os.environ.get("PW_LOOK", "")            # 'OURS:REPLIES': look one reply deep (see `plan_ranked`); empty for none
+LOOK = os.environ.get("PW_LOOK", "8:4")         # 'OURS:REPLIES': look one reply deep (see `plan_ranked`); empty for none
 LOOK_MS = float(os.environ.get("PW_LOOK_MS", "18"))  # time the look-ahead needs besides scoring its positions
 LOOK_SOURCES = 12                               # the opponent's planets with the most free ships that answers come from
 MIX = float(os.environ.get("PW_MIX", "0.5"))    # weight of the hand score against the value network's
