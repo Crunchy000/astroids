@@ -226,6 +226,7 @@ with `spare`), against the same planner without it at 64 launches:
 | 8 options, only the opponent's best answer | 64 | 0.530 |
 | 8 options, 4 answers | 48 | 0.548 |
 | 8 options, 4 answers | 32 | 0.474 |
+| 4 options, 4 answers | 64 / 48 | 0.544 / 0.538 |
 
 Looking ahead is worth about as much as doubling the launches re-ranked, so the two compete for the time. The entry
 finds the answers without stepping copies of the game (`replies` in `entry/planner.py`): a launch changes the

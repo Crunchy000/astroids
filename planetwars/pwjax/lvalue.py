@@ -64,12 +64,13 @@ def totals(s, me, owners, hand, v, mix, scale=200.0):
     return total + jnp.where(won & ~lost, 10.0, 0.0) - jnp.where(lost & ~won, 10.0, 0.0)
 
 
-def make_decider(plan, top, params=None, heads=None, has2=False, heads2=None):
+def make_decider(plan, top, params=None, heads=None, has2=False, heads2=None, plan_r=None, ours=0):
     """decide(s, me, h, eps, kind, key, params2) -> (action, (afterstate owners, ships, ticks looked ahead, hand score)).
 
     kind 0 plays the planner's hand score, 1 the value network alone, 2 the network mixed half and half with the
-    hand score, 3 a second (older) network, passed in as `params2`, mixed the same way. With probability eps one of the
-    usable options is picked at random instead."""
+    hand score, 3 a second (older) network, passed in as `params2`, mixed the same way. With `plan_r` (the opponent's
+    planner) kind 2 also looks one reply deep over its `ours` best options (see look_ahead). With probability eps one
+    of the usable options is picked at random instead."""
     def decide(s, me, h, eps, kind, key, params2=None):
         h_eff = jnp.maximum(jnp.minimum(h, s.max_ticks - s.tick), 1)
         out, owners, ships, hand, ok, v = options(plan, s, me, h_eff, top, params, heads)
@@ -79,6 +80,9 @@ def make_decider(plan, top, params=None, heads=None, has2=False, heads2=None):
         else:
             by_v = jnp.where(ok, totals(s, me, owners, hand, v, 0.0), -jnp.inf)
             by_mix = jnp.where(ok, totals(s, me, owners, hand, v, 0.5), -jnp.inf)
+            if plan_r is not None:
+                cand, val = look_ahead(plan_r, params, heads, s, me, h_eff, out, by_mix, ours, 0.5)
+                by_mix = jnp.full(top + 1, -jnp.inf).at[cand].set(val)
             score = jnp.where(kind == 0, by_hand, jnp.where(kind == 1, by_v, by_mix))
             if has2:
                 v2 = net_values(params2, heads2, s, me, owners, ships, h_eff)
@@ -122,13 +126,37 @@ def make_value_agent(params, heads, sources=12, horizon=90, top=8, mix=0.0, scal
     return act
 
 
+def look_ahead(plan_r, params, heads, s, me, h, out, plain, ours, mix, scale=200.0, weight=1.0):
+    """One reply deep: the `ours` best options by `plain` ([top + 1], waiting last, -inf where unusable) are each played
+    on a copy of the game, `plan_r` (the opponent's planner) finds its best answers by its own hand score, and the
+    network scores the position after each. Returns those options' indices [ours], best plain score first, and what
+    each is worth: weight * (the worst of its own score and those after the answers) + (1 - weight) * its own score."""
+    top = plain.shape[0] - 1
+    first, cand = jax.lax.top_k(plain, ours)                                       # [ours]
+    usable = jnp.isfinite(first)
+    launch = (cand < top) & usable
+    j = jnp.minimum(cand, top - 1)
+    acts = (jnp.where(launch, out["cand_src"][j], -1).astype(jnp.int32),
+            jnp.where(launch, out["cand_dst"][j], -1).astype(jnp.int32),
+            jnp.where(launch, out["cand_ships"][j], 0.0).astype(s.ships.dtype))
+    after = jax.vmap(lambda a: env._launch(s, me, a))(acts)
+    r = jax.vmap(lambda st: plan_r(st, 3 - me, h))(after)
+    ro, rs = r["cand_owner"], r["cand_ships_final"]                                # [ours, replies, N]
+    r_ok = jnp.isfinite(r["cand_score"])
+    r_hand = jplanner.score_final(ro, rs, s, me, jplanner.near_matrix(s))
+    r_v = jax.vmap(lambda o, sh: net_values(params, heads, s, me, o, sh, h))(ro, rs)
+    r_tot = totals(s, me, ro, r_hand, r_v, mix, scale)
+    worst = jnp.minimum(first, jnp.min(jnp.where(r_ok, r_tot, jnp.inf), 1))
+    return cand, jnp.where(usable, weight * worst + (1.0 - weight) * first, -jnp.inf)
+
+
 def make_reply_agent(params, heads, sources=12, horizon=90, top=8, mix=0.0, scale=200.0, wait=True,
                      fractions=jplanner.FRACTIONS, extras=(), ours=8, replies=3, weight=1.0):
     """make_value_agent, looking one reply deep. The planner's projection assumes nobody launches anything more, so it
     cannot see a counter-attack on a planet a launch has just emptied. Here the `ours` best options by the mixed score
     (waiting included) are each played on a copy of the game, the opponent's planner finds its `replies` best answers
     to each by its own hand score, and the network scores the position after each answer. An option is then worth
-    weight * (its worst case, the opponent not answering included) + (1 - weight) * (its plain score)."""
+    weight * (its worst case, the opponent not answering included) + (1 - weight) * (its plain score) (see look_ahead)."""
     plan = jplanner.make_planner(sources, horizon, top, fractions, extras)
     plan_r = jplanner.make_planner(sources, horizon, replies, fractions, extras)
 
@@ -138,23 +166,13 @@ def make_reply_agent(params, heads, sources=12, horizon=90, top=8, mix=0.0, scal
         out, owners, ships, hand, ok, v = options(plan, s, me, h, top, params, heads)
         ok = ok & jnp.concatenate([jnp.ones(top, bool), jnp.array([wait])])
         plain = jnp.where(ok, totals(s, me, owners, hand, v, mix, scale), -jnp.inf)
-        first, cand = jax.lax.top_k(plain, ours)                                   # [ours]
-        usable = jnp.isfinite(first)
-        launch = (cand < top) & usable
-        j = jnp.minimum(cand, top - 1)
-        acts = (jnp.where(launch, out["cand_src"][j], -1).astype(jnp.int32),
+        cand, val = look_ahead(plan_r, params, heads, s, me, h, out, plain, ours, mix, scale, weight)
+        k = cand[jnp.argmax(val)]
+        launch = (k < top) & ok[k]
+        j = jnp.minimum(k, top - 1)
+        return (jnp.where(launch, out["cand_src"][j], -1).astype(jnp.int32),
                 jnp.where(launch, out["cand_dst"][j], -1).astype(jnp.int32),
                 jnp.where(launch, out["cand_ships"][j], 0.0).astype(s.ships.dtype))
-        after = jax.vmap(lambda a: env._launch(s, me, a))(acts)
-        r = jax.vmap(lambda st: plan_r(st, 3 - me, h))(after)
-        ro, rs = r["cand_owner"], r["cand_ships_final"]                            # [ours, replies, N]
-        r_ok = jnp.isfinite(r["cand_score"])
-        r_hand = jplanner.score_final(ro, rs, s, me, jplanner.near_matrix(s))
-        r_v = jax.vmap(lambda o, sh: net_values(params, heads, s, me, o, sh, h))(ro, rs)
-        r_tot = totals(s, me, ro, r_hand, r_v, mix, scale)
-        worst = jnp.minimum(first, jnp.min(jnp.where(r_ok, r_tot, jnp.inf), 1))
-        k = jnp.argmax(jnp.where(usable, weight * worst + (1.0 - weight) * first, -jnp.inf))
-        return tuple(x[k] for x in acts)
     return act
 
 
@@ -163,7 +181,11 @@ def make_reply_agent(params, heads, sources=12, horizon=90, top=8, mix=0.0, scal
 def make_gen(cfg, n_envs, params=None, heads=None, has2=False, heads2=None):
     """gen(state carry, per-side settings, key, params2) plays `cfg.chunk` ticks, recording every `stride`th."""
     plan = jplanner.make_planner(cfg.sources, cfg.horizon, cfg.top, parse_fractions(cfg.fractions), parse_extras(cfg.extras))
-    decide = make_decider(plan, cfg.top, params, heads, has2, heads2)
+    plan_r, ours = None, 0
+    if cfg.reply:  # OURS:REPLIES: kind 2 looks one reply deep
+        ours, replies = (int(x) for x in cfg.reply.split(":"))
+        plan_r = jplanner.make_planner(cfg.sources, cfg.horizon, replies, parse_fractions(cfg.fractions), parse_extras(cfg.extras))
+    decide = make_decider(plan, cfg.top, params, heads, has2, heads2, plan_r, ours)
     v_decide = jax.vmap(decide, in_axes=(0, 0, 0, 0, 0, 0, None))
     v_step, v_term, v_greedy = jax.vmap(env.step), jax.vmap(env.is_terminal), jax.vmap(baselines.greedy)
     one, two = jnp.ones(n_envs, jnp.int32), jnp.full(n_envs, 2, jnp.int32)
@@ -459,9 +481,13 @@ def opponent(name):
     fractions, extras = parse_fractions(opts.get("fractions", "")), parse_extras(opts.get("extras", ""))
     if head == "hand":
         return make_hand_agent(12, 90, 8, fractions, extras)
-    if head.startswith("value:"):  # value:PATH:MIX[:TOP], a value-ranked planner
+    if head.startswith("value:"):  # value:PATH:MIX[:TOP], a value-ranked planner; ';reply=OURS:REPLIES' looks one reply deep
         path, mix, *top = head.split(":")[1:]
         params, heads = evaluate.load(path)
+        if opts.get("reply"):
+            ours, replies = (int(x) for x in opts["reply"].split(":"))
+            return make_reply_agent(params, heads, 12, 90, int(top[0]) if top else 8, float(mix), fractions=fractions, extras=extras,
+                                    ours=ours, replies=replies)
         return make_value_agent(params, heads, 12, 90, int(top[0]) if top else 8, float(mix), fractions=fractions, extras=extras)
     if head.endswith(".npz"):
         pol, heads = evaluate.load(head)
@@ -572,6 +598,7 @@ def main(argv=None):
     g.add_argument("--extras", default="", help="launch sizes beyond the fractions, '+' separated (see planner.make_planner)")
     g.add_argument("--fractions", default="", help="fractions of the source's ships to try (default 0.25,0.5,1)")
     g.add_argument("--bank-from", default=None, help="directory of an earlier run whose maps.npz to reuse")
+    g.add_argument("--reply", default="", help="OURS:REPLIES: sides of kind 2 look one opponent reply deep (see look_ahead)")
     g.add_argument("--seed", type=int, default=0)
     t = sub.add_parser("train")
     t.add_argument("--data", required=True)
