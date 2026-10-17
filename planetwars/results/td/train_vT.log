@@ -1,0 +1,78 @@
+devices: [CudaDevice(id=0)]
+train positions 2020628, held-out 131318
+  train: lambda-returns, mean |return - value| 0.1091, mean |return - result| 0.1729
+  held-out: lambda-returns, mean |return - value| 0.1154, mean |return - result| 0.1909
+hand score (tanh(score/50) rescaled):
+  hand: {"mse": 0.3388, "acc": 0.8789, "by_phase": [0.8316, 0.4557, 0.2788, 0.1628]}
+start:
+  net: {"mse": 0.2754, "acc": 0.9014, "by_phase": [0.6763, 0.3507, 0.2292, 0.1444]}
+  net vs lambda-returns: {"mse": 0.0614}
+step 100 loss 0.1407 (28s)
+  net: {"mse": 0.2795, "acc": 0.8996, "by_phase": [0.6866, 0.3562, 0.2328, 0.1461]}
+  net vs lambda-returns: {"mse": 0.0641}
+  (best so far at step 100)
+step 200 loss 0.0884 (29s)
+  net: {"mse": 0.2748, "acc": 0.9009, "by_phase": [0.6807, 0.3517, 0.2295, 0.1406]}
+  net vs lambda-returns: {"mse": 0.0617}
+  (best so far at step 200)
+step 300 loss 0.0862 (29s)
+  net: {"mse": 0.2724, "acc": 0.9014, "by_phase": [0.6709, 0.349, 0.2279, 0.1399]}
+  net vs lambda-returns: {"mse": 0.0609}
+  (best so far at step 300)
+step 400 loss 0.0845 (30s)
+  net: {"mse": 0.2736, "acc": 0.9005, "by_phase": [0.6727, 0.3482, 0.2277, 0.1434]}
+  net vs lambda-returns: {"mse": 0.0609}
+step 500 loss 0.0838 (30s)
+  net: {"mse": 0.2743, "acc": 0.9015, "by_phase": [0.6728, 0.348, 0.2301, 0.1434]}
+  net vs lambda-returns: {"mse": 0.0602}
+  (best so far at step 500)
+step 600 loss 0.0848 (31s)
+  net: {"mse": 0.2732, "acc": 0.9013, "by_phase": [0.6679, 0.3486, 0.2293, 0.1421]}
+  net vs lambda-returns: {"mse": 0.0595}
+  (best so far at step 600)
+step 700 loss 0.0832 (32s)
+  net: {"mse": 0.2708, "acc": 0.9027, "by_phase": [0.6641, 0.3458, 0.2277, 0.1398]}
+  net vs lambda-returns: {"mse": 0.0589}
+  (best so far at step 700)
+step 800 loss 0.0827 (32s)
+  net: {"mse": 0.27, "acc": 0.9034, "by_phase": [0.6645, 0.3437, 0.2272, 0.1392]}
+  net vs lambda-returns: {"mse": 0.0585}
+  (best so far at step 800)
+step 900 loss 0.0821 (33s)
+  net: {"mse": 0.271, "acc": 0.9033, "by_phase": [0.6665, 0.3464, 0.2284, 0.1385]}
+  net vs lambda-returns: {"mse": 0.0595}
+step 1000 loss 0.0817 (33s)
+  net: {"mse": 0.2726, "acc": 0.9013, "by_phase": [0.6735, 0.3507, 0.2282, 0.1382]}
+  net vs lambda-returns: {"mse": 0.0603}
+step 1100 loss 0.0822 (34s)
+  net: {"mse": 0.2712, "acc": 0.9024, "by_phase": [0.664, 0.3461, 0.2278, 0.1406]}
+  net vs lambda-returns: {"mse": 0.0586}
+step 1200 loss 0.0820 (34s)
+  net: {"mse": 0.2691, "acc": 0.9032, "by_phase": [0.6617, 0.3445, 0.2266, 0.1375]}
+  net vs lambda-returns: {"mse": 0.0588}
+step 1300 loss 0.0812 (35s)
+  net: {"mse": 0.2713, "acc": 0.9026, "by_phase": [0.6615, 0.3444, 0.2291, 0.1419]}
+  net vs lambda-returns: {"mse": 0.0589}
+step 1400 loss 0.0806 (36s)
+  net: {"mse": 0.2696, "acc": 0.9031, "by_phase": [0.6638, 0.3449, 0.2261, 0.1382]}
+  net vs lambda-returns: {"mse": 0.0585}
+step 1500 loss 0.0809 (36s)
+  net: {"mse": 0.2685, "acc": 0.9038, "by_phase": [0.6622, 0.3443, 0.2256, 0.1364]}
+  net vs lambda-returns: {"mse": 0.0583}
+  (best so far at step 1500)
+step 1600 loss 0.0805 (37s)
+  net: {"mse": 0.2701, "acc": 0.9029, "by_phase": [0.6612, 0.3439, 0.2264, 0.141]}
+  net vs lambda-returns: {"mse": 0.0577}
+  (best so far at step 1600)
+step 1700 loss 0.0810 (37s)
+  net: {"mse": 0.2695, "acc": 0.9029, "by_phase": [0.6613, 0.344, 0.226, 0.1396]}
+  net vs lambda-returns: {"mse": 0.0581}
+step 1800 loss 0.0813 (38s)
+  net: {"mse": 0.2711, "acc": 0.9026, "by_phase": [0.6655, 0.3452, 0.2277, 0.1405]}
+  net vs lambda-returns: {"mse": 0.0586}
+step 1900 loss 0.0809 (38s)
+  net: {"mse": 0.2695, "acc": 0.9031, "by_phase": [0.6616, 0.3439, 0.2259, 0.1396]}
+  net vs lambda-returns: {"mse": 0.0578}
+step 2000 loss 0.0806 (39s)
+  net: {"mse": 0.2692, "acc": 0.9035, "by_phase": [0.6612, 0.3441, 0.2261, 0.1386]}
+  net vs lambda-returns: {"mse": 0.0577}

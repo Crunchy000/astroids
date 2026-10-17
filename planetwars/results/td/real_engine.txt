@@ -1,0 +1,6 @@
+Real engine (Kotlin PairEvalKt, 200 ms a move, both served by entry/main.py's PlannerAgent with look-ahead at 128 launches).
+remote8531 = TD network (vT, now entry/value.npz), remote8532 = the previous entry/value.npz:
+RESULT a=remote8531 b=remote8532 a_wins=41.0 b_wins=23.0 games=64 a_timeouts=0 b_timeouts=1 a_ms=10.54 b_ms=8.91
+
+The entry with the TD network against TeamTitansAgentV3 (one series of 32):
+RESULT a=remote8541 b=titans a_wins=31.0 b_wins=1.0 games=32 a_timeouts=0 b_timeouts=0 a_ms=12.91 b_ms=2.22

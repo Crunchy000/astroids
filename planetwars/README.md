@@ -2,7 +2,8 @@
 
 An entry for Simon Lucas's [Planet Wars RTS](https://simonlucas.github.io/planet-wars-rts/) league.
 The entry served by default is an all-moves planner (`entry/planner.py`) whose best few launches are
-re-ranked by a small network (`entry/value.npz`, a faster copy of one trained on the results of planner games), checking the opponent's
+re-ranked by a small network (`entry/value.npz`, a faster copy of one trained on the results of planner games, then
+trained to predict its own later values), checking the opponent's
 best answers to its eight best options before it picks one. Without that
 file, or with `PW_VALUE=off`, it ranks launches by a hand-written score alone. A neural network
 trained by self-play on a GPU is also in the repo (`PW_AGENT=neural`); the planner beats it in 57 of 60
@@ -24,7 +25,8 @@ planetwars/
     Dockerfile     their Python template: python:3.11-slim, port 8080
     main.py        GameServerAgent(host="0.0.0.0", port=8080, agent=PlannerAgent()); PW_AGENT=neural serves the network
     planner.py     the all-moves planner (numpy only), the default agent
-    value.npz      value network that re-ranks the planner's best launches (a 2-layer copy of round 6, see below)
+    value.npz      value network that re-ranks the planner's best launches (a 2-layer copy of round 6, trained on
+                   with self-predicting targets, see below)
     agent.py       the neural agent (numpy only)
     pwnet.py       features + network, shared verbatim with training (numpy or jax.numpy)
     model.npz      trained weights (self-play iteration 450)
@@ -288,6 +290,27 @@ positions; 0.458 against 0.524 at ticks 150 to 300), and they differ from the ne
 average at ticks 0 to 150), where they lean towards the side that moves first. So the look-ahead is good at spotting a
 launch the opponent can punish, but the position it ends on (one launch each, then nobody does anything for another
 90 ticks) is a worse guide to who wins than the network's view of the position before. About 4 Colab compute units.
+
+**Self-predicting targets.** A game's result says little about an opening position: it is settled hundreds of ticks
+later, and that is where most of the network's error is. So each recorded position is trained instead towards the
+network's own values of the same side's later positions in the same game, the next one weighted most and each further
+one by another 0.95 (on average about 20 records, 160 ticks, on), with the result coming in only at the end
+(λ-returns, as in TD(λ); `lvalue train --td-lambda 0.95`, and `--td-refresh 500` recomputes them with the network as
+it learns). 8,000 fresh games (`lvalue gen` with the shipped network, round 6 and round 5 as opponents, otherwise the
+recipe of rounds 6 and 7) trained the shipped network for 2,000 more steps each way. In JAX, both looking ahead at 128
+launches, 1,024 games against the shipped network:
+
+| Trained towards | Score | Run again |
+|---|---|---|
+| the game's result (control) | 0.463 | |
+| λ-returns of the starting network | 0.601 | 0.625 |
+| λ-returns, recomputed every 500 steps | 0.602 | 0.621 |
+
+The same games taught with their results made the network worse, as round 7 had; taught with its own later values,
+it got clearly better, and it also predicts held-out results better without ever being shown them (error 0.275 to
+0.269, the most in the opening, 0.676 to 0.661). In the real engine it beat the shipped network in 41 of 64 games and TeamTitansAgentV3 in 31 of 32 (no timeouts),
+and it is now `entry/value.npz` (same shape, so the same speed). About 14 Colab compute units: the first run's networks were lost
+when the machine was reclaimed, so it was run again (`results/td`, with the first run's scores in `first_run.txt`).
 
 The earlier value network in "A value function trained on game results (did not help)" below was asked a
 different question, which of the policy's own moves is worth most, and the policy's moves were not where

@@ -1,0 +1,7 @@
+First run (same commands and seeds; its networks were lost when the Colab machine was reclaimed, so only the match
+results survive, from the session's poll log). lvalue match --games 512 --mix 0.5 --top 128 --extras spare --seed 97
+--reply 8:4 --vs 'value:s64l2.npz:0.5:128;extras=spare;reply=8:4', 1,024 games each:
+
+vZ  trained towards the game's result (control)          474 wins, 550 losses  0.4629
+vT  lambda-returns (0.95) of the starting network         615 wins, 409 losses  0.6006
+vR  lambda-returns, recomputed every 500 steps            616 wins, 408 losses  0.6016
