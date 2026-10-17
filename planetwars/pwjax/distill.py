@@ -6,8 +6,17 @@ entry actually asks about: the planner's best launches (by hand score) in games 
 after the opponent's answers. Its targets have none of a game result's noise, so far fewer games are needed.
 
     python -m pwjax.distill gen   --teacher r6.npz --out dd --batches 4
-    python -m pwjax.distill train --teacher r6.npz --data dd --out small --d-model 64 --layers 3 --d-ff 128
+    python -m pwjax.distill train --data dd --out small --d-model 64 --layers 3 --d-ff 128
     python -m pwjax.lvalue match small/best.npz --top 64 --reply 8:4 --vs 'value:r6.npz:0.5:64;extras=spare;reply=8:4'
+
+The same machinery can teach a network what the look-ahead makes of a position instead of what the network itself
+says (`--target search`): from each recorded position the teacher plays its best option against the opponent's best
+answer, as the entry would, and the target is its value of where that leaves. A network that learns this sees one
+move and one answer further, and a look-ahead built on it sees further again (search-bootstrapped values, as in
+TreeStrap). Each record also keeps the game's result, which `train --outcome` can mix into the target.
+
+    python -m pwjax.distill gen   --teacher small.npz --out ts --target search --per 4
+    python -m pwjax.distill train --data ts --init small.npz --out small2 --lr 3e-4 --lr-end 2e-5 --steps 10000
 """
 import argparse
 import json
@@ -21,16 +30,31 @@ import optax
 
 from . import env, evaluate, maps, policy
 from . import planner as jplanner
-from .lvalue import EPS, make_value_agent, net_values, options, totals
+from .lvalue import EPS, fresh, look_ahead, make_value_agent, net_values, options, totals
 from .ppo import save_params, tree_where
+
+
+def make_searcher(params, heads, plan, plan_r, cfg):
+    """search(position, me) -> what the teacher's look-ahead makes of a position, played from there as the entry plays:
+    its best option after the opponent's best answer, and the teacher's value of the position that leaves."""
+    def search(p, me):
+        h = jnp.maximum(jnp.minimum(cfg.horizon, p.max_ticks - p.tick), 1)
+        out, owners, ships, hand, ok, v = options(plan, p, me, h, cfg.top, params, heads)
+        plain = jnp.where(ok, totals(p, me, owners, hand, v, 0.5), -jnp.inf)
+        _, val, leaf = look_ahead(plan_r, params, heads, p, me, h, out, plain, 8, 0.5, owners=owners, v=v)
+        return leaf[jnp.argmax(val)]
+    return search
 
 
 def make_recorder(params, heads, cfg):
     """record(state, me, h, key) -> `cfg.per` positions the entry would score this tick: owners, ships [per, N],
-    the teacher's values [per] and which are usable. Half come from the planner's best `cfg.top` launches and waiting,
-    half from the opponent's answers to the best `ours` of those (the look-ahead's positions)."""
+    their targets [per], which are usable, and the teacher's own values [per]. Half come from the planner's best
+    `cfg.top` launches and waiting, half from the opponent's answers to the best `ours` of those (the look-ahead's
+    positions). The target is the teacher's value, or with `cfg.target == "search"` what its look-ahead makes of
+    the position (make_searcher)."""
     plan = jplanner.make_planner(cfg.sources, cfg.horizon, cfg.top, jplanner.FRACTIONS, ("spare",))
     plan_r = jplanner.make_planner(cfg.sources, cfg.horizon, 4, jplanner.FRACTIONS, ("spare",))
+    search = make_searcher(params, heads, plan, plan_r, cfg)
     half = cfg.per // 2
 
     def record(s, me, h, key):
@@ -53,7 +77,13 @@ def make_recorder(params, heads, cfg):
         o = jnp.concatenate([o1, ro[pick2]])
         sh = jnp.concatenate([s1, rs[pick2]])
         use = jnp.concatenate([ok1 & ok.any(), r_ok[pick2] & r_ok.any()])
-        return o, sh, net_values(params, heads, s, me, o, sh, h), use
+        v0 = net_values(params, heads, s, me, o, sh, h)
+        if cfg.target == "search":
+            # one position at a time: each search runs the planner nine times, so all at once would not fit
+            target = jax.lax.map(lambda ab: search(fresh(s, ab[0], ab[1], s.tick + h), me), (o, sh))
+        else:
+            target = v0
+        return o, sh, target, use, v0
     return record
 
 
@@ -90,8 +120,8 @@ def cmd_gen(cfg):
             s, done = c
             me = jnp.where(jax.random.bernoulli(ks[-1], 0.5, (n,)), 1, 2).astype(jnp.int32)
             h = jnp.maximum(jnp.minimum(hs, s.max_ticks - s.tick), 1)
-            o, sh, v, use = v_rec(s, me, h, jax.random.split(ks[-1], n))
-            return c, dict(owner=o.astype(jnp.int8), ships=sh, v=v, use=use & ~done[:, None], tick=s.tick + h, me=me)
+            o, sh, v, use, v0 = v_rec(s, me, h, jax.random.split(ks[-1], n))
+            return c, dict(owner=o.astype(jnp.int8), ships=sh, v=v, v0=v0, use=use & ~done[:, None], tick=s.tick + h, me=me)
 
         return jax.lax.scan(block, c, jax.random.split(key, cfg.chunk // cfg.stride))
 
@@ -106,21 +136,30 @@ def cmd_gen(cfg):
             hs = jnp.full(n, cfg.horizon, jnp.int32)
             eps = float(rng.choice(EPS)) + 0.02
             recs = []
-            for _ in range(-(-2001 // cfg.chunk)):
+            for _ in range(-(-cfg.ticks // cfg.chunk)):
                 if bool(c[1].all()):
                     break
                 key, k = jax.random.split(key)
                 c, rec = chunk(c, hs, eps, k)
                 recs.append(jax.tree.map(np.asarray, rec))
             r = {k: np.concatenate([x[k] for x in recs]) for k in recs[0]}            # [snaps, n, ...]
+            # the game's result from the recorded side's view (the leader in ships on planets at the end)
+            lead = np.asarray(jax.vmap(env.leader)(c[0]))
+            z1 = np.where(lead == 1, 1.0, np.where(lead == 2, -1.0, 0.0)).astype(np.float32)
+            r["z"] = np.where(r["me"] == 1, z1[None], -z1[None])
             per = r["use"].shape[-1]
             use = r["use"].reshape(-1)
             rep = lambda a: np.broadcast_to(a[..., None], a.shape + (per,)).reshape(-1)  # noqa: E731
             part = dict(owner=r["owner"].reshape(-1, r["owner"].shape[-1])[use], ships=r["ships"].reshape(-1, r["ships"].shape[-1])[use].astype(np.float32),
-                        v=r["v"].reshape(-1)[use], tick=rep(r["tick"])[use], me=rep(r["me"])[use],
+                        v=r["v"].reshape(-1)[use], v0=r["v0"].reshape(-1)[use], z=rep(r["z"])[use],
+                        tick=rep(r["tick"])[use], me=rep(r["me"])[use],
                         map=rep(np.broadcast_to(ids[None], r["me"].shape))[use])
             parts.append(part)
-            print(json.dumps(dict(set=name, batch=b + 1, positions=int(use.sum()), seconds=round(time.time() - t0, 1))), flush=True)
+            print(json.dumps(dict(set=name, batch=b + 1, positions=int(use.sum()), seconds=round(time.time() - t0, 1),
+                                  target_mean=round(float(part["v"].mean()), 4), teacher_mean=round(float(part["v0"].mean()), 4),
+                                  target_vs_teacher=round(float(np.mean(np.abs(part["v"] - part["v0"]))), 4),
+                                  corr_result=round(float(np.corrcoef(part["v"], part["z"])[0, 1]), 4),
+                                  teacher_corr_result=round(float(np.corrcoef(part["v0"], part["z"])[0, 1]), 4))), flush=True)
         np.savez(os.path.join(cfg.out, f"{name}.npz"), **{k: np.concatenate([p[k] for p in parts]) for k in parts[0]})
 
 
@@ -128,7 +167,13 @@ def cmd_train(cfg):
     bank = {k: jnp.asarray(v) for k, v in np.load(os.path.join(cfg.data, "maps.npz")).items()}
     tr = {k: jnp.asarray(v) for k, v in np.load(os.path.join(cfg.data, "train.npz")).items()}
     va = {k: jnp.asarray(v) for k, v in np.load(os.path.join(cfg.data, "val.npz")).items()}
-    params = policy.init(jax.random.PRNGKey(cfg.seed), cfg.d_model, cfg.layers, cfg.heads, 32, cfg.d_ff)
+    if cfg.init:
+        params, cfg.heads = evaluate.load(cfg.init)
+        params = {k: v for k, v in params.items() if not k.startswith("aux.")}
+    else:
+        params = policy.init(jax.random.PRNGKey(cfg.seed), cfg.d_model, cfg.layers, cfg.heads, 32, cfg.d_ff)
+    for d in (tr, va):  # what the network learns: the recorded target, with `outcome` of the game's result mixed in
+        d["v"] = (1.0 - cfg.outcome) * d["v"] + cfg.outcome * d["z"] if cfg.outcome else d["v"]
 
     def values(params, b):
         def one(i, owner, ships, tick, me):
@@ -194,9 +239,14 @@ def main(argv=None):
     g.add_argument("--sources", type=int, default=12)
     g.add_argument("--horizon", type=int, default=90)
     g.add_argument("--seed", type=int, default=0)
+    g.add_argument("--target", choices=("value", "search"), default="value",
+                   help="the teacher's value of each position, or what its look-ahead makes of it")
+    g.add_argument("--ticks", type=int, default=2001, help="stop the games after this many ticks (for quick tests)")
     t = sub.add_parser("train")
     t.add_argument("--data", required=True)
     t.add_argument("--out", required=True)
+    t.add_argument("--init", default="", help="start from this network instead of a fresh one (its shape wins)")
+    t.add_argument("--outcome", type=float, default=0.0, help="weight of the game's result in the target")
     t.add_argument("--d-model", type=int, default=64)
     t.add_argument("--layers", type=int, default=3)
     t.add_argument("--heads", type=int, default=4)

@@ -126,11 +126,14 @@ def make_value_agent(params, heads, sources=12, horizon=90, top=8, mix=0.0, scal
     return act
 
 
-def look_ahead(plan_r, params, heads, s, me, h, out, plain, ours, mix, scale=200.0, weight=1.0):
+def look_ahead(plan_r, params, heads, s, me, h, out, plain, ours, mix, scale=200.0, weight=1.0, owners=None, v=None):
     """One reply deep: the `ours` best options by `plain` ([top + 1], waiting last, -inf where unusable) are each played
     on a copy of the game, `plan_r` (the opponent's planner) finds its best answers by its own hand score, and the
     network scores the position after each. Returns those options' indices [ours], best plain score first, and what
-    each is worth: weight * (the worst of its own score and those after the answers) + (1 - weight) * its own score."""
+    each is worth: weight * (the worst of its own score and those after the answers) + (1 - weight) * its own score.
+
+    Given the options' projected `owners` and network values `v` ([top + 1]), also returns, for each, the network's
+    value of the position where that worst case is reached (1 or -1 where that position is already won or lost)."""
     top = plain.shape[0] - 1
     first, cand = jax.lax.top_k(plain, ours)                                       # [ours]
     usable = jnp.isfinite(first)
@@ -147,7 +150,17 @@ def look_ahead(plan_r, params, heads, s, me, h, out, plain, ours, mix, scale=200
     r_v = jax.vmap(lambda o, sh: net_values(params, heads, s, me, o, sh, h))(ro, rs)
     r_tot = totals(s, me, ro, r_hand, r_v, mix, scale)
     worst = jnp.minimum(first, jnp.min(jnp.where(r_ok, r_tot, jnp.inf), 1))
-    return cand, jnp.where(usable, weight * worst + (1.0 - weight) * first, -jnp.inf)
+    val = jnp.where(usable, weight * worst + (1.0 - weight) * first, -jnp.inf)
+    if v is None:
+        return cand, val
+    # where the worst case is reached: the option itself (column 0) or one of the answers
+    tots = jnp.concatenate([first[:, None], jnp.where(r_ok, r_tot, jnp.inf)], 1)
+    leaf_o = jnp.concatenate([owners[cand][:, None], ro], 1)                     # [ours, 1 + replies, N]
+    leaf_v = jnp.concatenate([v[cand][:, None], r_v], 1)
+    mine, opp = s.valid & (leaf_o == me), s.valid & (leaf_o == 3 - me)
+    won, lost = jnp.sum(opp, -1) == 0, jnp.sum(mine, -1) == 0
+    leaf_v = jnp.where(won & ~lost, 1.0, jnp.where(lost & ~won, -1.0, leaf_v))
+    return cand, val, jnp.take_along_axis(leaf_v, jnp.argmin(tots, 1)[:, None], 1)[:, 0]
 
 
 def make_reply_agent(params, heads, sources=12, horizon=90, top=8, mix=0.0, scale=200.0, wait=True,
