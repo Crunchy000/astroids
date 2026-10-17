@@ -1,0 +1,10 @@
+devices: [CudaDevice(id=0)]
+{"set": "val", "batch": 1, "positions": 72271, "win1": 0.498, "win2": 0.492, "seconds": 140.7, "opponent": "/content/r6.npz", "main_wins_vs_it": 0.631}
+{"set": "train", "batch": 1, "positions": 143165, "win1": 0.512, "win2": 0.477, "seconds": 154.6, "opponent": "/content/s64l2.npz", "main_wins_vs_it": 0.593}
+{"set": "train", "batch": 2, "positions": 142367, "win1": 0.516, "win2": 0.479, "seconds": 270.8, "opponent": "/content/s64l2.npz", "main_wins_vs_it": 0.606}
+{"set": "train", "batch": 3, "positions": 148410, "win1": 0.513, "win2": 0.481, "seconds": 500.0, "opponent": "/content/r6.npz", "main_wins_vs_it": 0.609}
+{"set": "train", "batch": 4, "positions": 147673, "win1": 0.501, "win2": 0.491, "seconds": 616.1, "opponent": "/content/s64l2.npz", "main_wins_vs_it": 0.583}
+{"set": "train", "batch": 5, "positions": 146887, "win1": 0.502, "win2": 0.492, "seconds": 732.3, "opponent": "/content/s64l2.npz", "main_wins_vs_it": 0.61}
+{"set": "train", "batch": 6, "positions": 145195, "win1": 0.512, "win2": 0.479, "seconds": 848.5, "opponent": "/content/s64l2.npz", "main_wins_vs_it": 0.624}
+{"set": "train", "batch": 7, "positions": 148941, "win1": 0.507, "win2": 0.489, "seconds": 964.7, "opponent": "/content/s64l2.npz", "main_wins_vs_it": 0.63}
+{"set": "train", "batch": 8, "positions": 147391, "win1": 0.521, "win2": 0.472, "seconds": 1152.3, "opponent": "/content/r6.npz", "main_wins_vs_it": 0.546}

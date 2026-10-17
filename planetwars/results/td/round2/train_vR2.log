@@ -1,0 +1,78 @@
+devices: [CudaDevice(id=0)]
+train positions 2116300, held-out 129372
+  train: lambda-returns, mean |return - value| 0.1069, mean |return - result| 0.1889
+  held-out: lambda-returns, mean |return - value| 0.1092, mean |return - result| 0.1976
+hand score (tanh(score/50) rescaled):
+  hand: {"mse": 0.3424, "acc": 0.8757, "by_phase": [0.8085, 0.4964, 0.3133, 0.1259]}
+start:
+  net: {"mse": 0.2893, "acc": 0.8944, "by_phase": [0.626, 0.3952, 0.2735, 0.1325]}
+  net vs lambda-returns: {"mse": 0.054}
+step 100 loss 0.0965 (29s)
+  net: {"mse": 0.2888, "acc": 0.8941, "by_phase": [0.6295, 0.3966, 0.2716, 0.1309]}
+  net vs lambda-returns: {"mse": 0.0547}
+step 200 loss 0.0812 (30s)
+  net: {"mse": 0.288, "acc": 0.8946, "by_phase": [0.6273, 0.3965, 0.273, 0.1281]}
+  net vs lambda-returns: {"mse": 0.0548}
+step 300 loss 0.0804 (30s)
+  net: {"mse": 0.2885, "acc": 0.8936, "by_phase": [0.6253, 0.3964, 0.2737, 0.1296]}
+  net vs lambda-returns: {"mse": 0.0546}
+step 400 loss 0.0798 (31s)
+  net: {"mse": 0.2886, "acc": 0.8935, "by_phase": [0.6278, 0.3966, 0.2746, 0.1283]}
+  net vs lambda-returns: {"mse": 0.054}
+step 500 loss 0.0796 (31s)
+  net: {"mse": 0.2904, "acc": 0.8933, "by_phase": [0.6316, 0.398, 0.2752, 0.1308]}
+  net vs lambda-returns: {"mse": 0.0546}
+step 500: new lambda-returns from the network as it is now
+  train: lambda-returns, mean |return - value| 0.1053, mean |return - result| 0.1947
+  held-out: lambda-returns, mean |return - value| 0.1079, mean |return - result| 0.2047
+step 600 loss 0.0768 (35s)
+  net: {"mse": 0.2906, "acc": 0.8942, "by_phase": [0.6285, 0.3988, 0.2758, 0.1313]}
+  net vs lambda-returns: {"mse": 0.0516}
+step 700 loss 0.0772 (36s)
+  net: {"mse": 0.2924, "acc": 0.8926, "by_phase": [0.635, 0.399, 0.2771, 0.1331]}
+  net vs lambda-returns: {"mse": 0.0521}
+step 800 loss 0.0758 (36s)
+  net: {"mse": 0.2905, "acc": 0.8938, "by_phase": [0.6289, 0.3982, 0.2784, 0.1291]}
+  net vs lambda-returns: {"mse": 0.0526}
+step 900 loss 0.0758 (37s)
+  net: {"mse": 0.29, "acc": 0.8947, "by_phase": [0.6268, 0.3955, 0.2771, 0.1311]}
+  net vs lambda-returns: {"mse": 0.0528}
+step 1000 loss 0.0760 (38s)
+  net: {"mse": 0.289, "acc": 0.8943, "by_phase": [0.6257, 0.3952, 0.2759, 0.1301]}
+  net vs lambda-returns: {"mse": 0.0509}
+step 1000: new lambda-returns from the network as it is now
+  train: lambda-returns, mean |return - value| 0.1042, mean |return - result| 0.1944
+  held-out: lambda-returns, mean |return - value| 0.1071, mean |return - result| 0.2053
+step 1100 loss 0.0747 (42s)
+  net: {"mse": 0.2908, "acc": 0.8934, "by_phase": [0.6284, 0.3969, 0.2782, 0.1313]}
+  net vs lambda-returns: {"mse": 0.0511}
+step 1200 loss 0.0751 (42s)
+  net: {"mse": 0.2892, "acc": 0.8937, "by_phase": [0.6246, 0.3953, 0.2762, 0.1306]}
+  net vs lambda-returns: {"mse": 0.0506}
+step 1300 loss 0.0748 (43s)
+  net: {"mse": 0.2898, "acc": 0.8938, "by_phase": [0.6268, 0.3953, 0.2768, 0.1312]}
+  net vs lambda-returns: {"mse": 0.0515}
+step 1400 loss 0.0741 (43s)
+  net: {"mse": 0.2901, "acc": 0.8934, "by_phase": [0.6256, 0.3956, 0.2759, 0.1328]}
+  net vs lambda-returns: {"mse": 0.0512}
+step 1500 loss 0.0747 (44s)
+  net: {"mse": 0.293, "acc": 0.8919, "by_phase": [0.6358, 0.3996, 0.2794, 0.1323]}
+  net vs lambda-returns: {"mse": 0.052}
+step 1500: new lambda-returns from the network as it is now
+  train: lambda-returns, mean |return - value| 0.1029, mean |return - result| 0.1962
+  held-out: lambda-returns, mean |return - value| 0.1060, mean |return - result| 0.2080
+step 1600 loss 0.0742 (48s)
+  net: {"mse": 0.29, "acc": 0.8937, "by_phase": [0.6257, 0.3956, 0.2774, 0.1313]}
+  net vs lambda-returns: {"mse": 0.0503}
+step 1700 loss 0.0740 (48s)
+  net: {"mse": 0.2905, "acc": 0.8938, "by_phase": [0.6276, 0.3956, 0.2775, 0.132]}
+  net vs lambda-returns: {"mse": 0.0502}
+step 1800 loss 0.0741 (49s)
+  net: {"mse": 0.2906, "acc": 0.894, "by_phase": [0.6283, 0.396, 0.2773, 0.132]}
+  net vs lambda-returns: {"mse": 0.05}
+step 1900 loss 0.0733 (50s)
+  net: {"mse": 0.292, "acc": 0.8932, "by_phase": [0.6314, 0.3977, 0.2789, 0.1326]}
+  net vs lambda-returns: {"mse": 0.0502}
+step 2000 loss 0.0733 (50s)
+  net: {"mse": 0.2919, "acc": 0.8932, "by_phase": [0.6276, 0.3962, 0.2794, 0.1341]}
+  net vs lambda-returns: {"mse": 0.0499}
