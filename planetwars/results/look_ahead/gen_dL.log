@@ -1,0 +1,14 @@
+devices: [CudaDevice(id=0)]
+{"set": "val", "batch": 1, "positions": 69286, "win1": 0.531, "win2": 0.461, "seconds": 425.1, "opponent": "/content/r6.npz", "main_wins_vs_it": 0.513}
+{"set": "train", "batch": 1, "positions": 139873, "win1": 0.544, "win2": 0.445, "seconds": 759.8, "opponent": "/content/r6.npz", "main_wins_vs_it": 0.465}
+{"set": "train", "batch": 2, "positions": 140273, "win1": 0.519, "win2": 0.468, "seconds": 1428.6, "opponent": "/content/r5.npz", "main_wins_vs_it": 0.578}
+{"set": "train", "batch": 3, "positions": 136326, "win1": 0.534, "win2": 0.461, "seconds": 2097.3, "opponent": "/content/r6.npz", "main_wins_vs_it": 0.48}
+{"set": "train", "batch": 4, "positions": 137026, "win1": 0.518, "win2": 0.477, "seconds": 2766.2, "opponent": "/content/r3.npz", "main_wins_vs_it": 0.547}
+{"set": "train", "batch": 5, "positions": 133098, "win1": 0.534, "win2": 0.458, "seconds": 3435.0, "opponent": "/content/r3.npz", "main_wins_vs_it": 0.532}
+{"set": "train", "batch": 6, "positions": 137069, "win1": 0.521, "win2": 0.466, "seconds": 4103.8, "opponent": "/content/r3.npz", "main_wins_vs_it": 0.583}
+{"set": "train", "batch": 7, "positions": 139939, "win1": 0.52, "win2": 0.474, "seconds": 4772.6, "opponent": "/content/r5.npz", "main_wins_vs_it": 0.517}
+{"set": "train", "batch": 8, "positions": 132142, "win1": 0.519, "win2": 0.465, "seconds": 5441.4, "opponent": "/content/r5.npz", "main_wins_vs_it": 0.499}
+{"set": "train", "batch": 9, "positions": 136981, "win1": 0.494, "win2": 0.497, "seconds": 6110.2, "opponent": "/content/r5.npz", "main_wins_vs_it": 0.507}
+{"set": "train", "batch": 10, "positions": 136332, "win1": 0.521, "win2": 0.472, "seconds": 6779.0, "opponent": "/content/r6.npz", "main_wins_vs_it": 0.491}
+{"set": "train", "batch": 11, "positions": 136751, "win1": 0.499, "win2": 0.494, "seconds": 7447.8, "opponent": "/content/r5.npz", "main_wins_vs_it": 0.591}
+{"set": "train", "batch": 12, "positions": 134939, "win1": 0.503, "win2": 0.488, "seconds": 8116.6, "opponent": "/content/r3.npz", "main_wins_vs_it": 0.511}

@@ -244,6 +244,15 @@ fleet goes out on the promise of a second that the next tick's ranking often doe
 instead of 64 scored 0.533 in JAX (96: 0.530), but under load moves took up to 150 ms and one in 64 games timed out.
 A seventh round of training (same recipe, played by round 6) lost to round 6 (975 to 1,073) and was not used.
 
+**Training on look-ahead games (did not help).** The AlphaZero idea: if search plays better than the network alone,
+games played with search should teach the network something new. 12,000 games (`gen --reply 8:4`), half the sides
+round 6 looking ahead, the rest round 6, 5 or 3 without it, the hand score or the network alone; training continued
+from round 6 as before. On held-out games of this set round 6 already had error 0.291, and training never got below
+it (0.292 at best, step 200). The trained network lost to round 6, both looking ahead, 457 to 567 (0.446), and 488 to
+536 without look-ahead. The network seems to be at the limit of what a game's result can teach it about a position:
+its error is mostly in the opening (0.64 against 0.15 near the end), where the result is far off. About 16 Colab
+compute units.
+
 The earlier value network in "A value function trained on game results (did not help)" below was asked a
 different question, which of the policy's own moves is worth most, and the policy's moves were not where
 the gap was.
