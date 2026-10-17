@@ -25,8 +25,8 @@ planetwars/
     Dockerfile     their Python template: python:3.11-slim, port 8080
     main.py        GameServerAgent(host="0.0.0.0", port=8080, agent=PlannerAgent()); PW_AGENT=neural serves the network
     planner.py     the all-moves planner (numpy only), the default agent
-    value.npz      value network that re-ranks the planner's best launches (a 2-layer copy of round 6, trained on
-                   with self-predicting targets, see below)
+    value.npz      value network that re-ranks the planner's best launches (a 2-layer copy of round 6, then two
+                   rounds of self-predicting targets, see below)
     agent.py       the neural agent (numpy only)
     pwnet.py       features + network, shared verbatim with training (numpy or jax.numpy)
     model.npz      trained weights (self-play iteration 450)
@@ -308,9 +308,15 @@ launches, 1,024 games against the shipped network:
 
 The same games taught with their results made the network worse, as round 7 had; taught with its own later values,
 it got clearly better, and it also predicts held-out results better without ever being shown them (error 0.275 to
-0.269, the most in the opening, 0.676 to 0.661). In the real engine it beat the shipped network in 41 of 64 games and TeamTitansAgentV3 in 31 of 32 (no timeouts),
-and it is now `entry/value.npz` (same shape, so the same speed). About 14 Colab compute units: the first run's networks were lost
+0.269, the most in the opening, 0.676 to 0.661). In the real engine it beat the shipped network in 41 of 64 games and TeamTitansAgentV3 in 31 of 32 (no timeouts). About 14 Colab compute units: the first run's networks were lost
 when the machine was reclaimed, so it was run again (`results/td`, with the first run's scores in `first_run.txt`).
+
+A second round, the same way from 8,000 games the new network played (with the previous one and round 6 as
+opponents), gained again but less: 0.565 against it in JAX (0.509 with the targets recomputed every 500 steps), 73 of
+128 in the real engine (33 of 64, then 40 of 64; one move timed out). Held-out error on results barely moved (0.2893
+to 0.2887), so the gains look to be thinning. The second-round network beat TeamTitansAgentV3 in 32 of 32 and is now
+`entry/value.npz` (same shape, so the same speed). About 4 Colab
+compute units (`results/td/round2`).
 
 The earlier value network in "A value function trained on game results (did not help)" below was asked a
 different question, which of the policy's own moves is worth most, and the policy's moves were not where
