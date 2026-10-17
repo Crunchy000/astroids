@@ -281,6 +281,8 @@ def play_batch(cfg, bank, map_ids, rng, key, gen, p2=None):
     out["kinds"] = np.stack([np.broadcast_to(np.asarray(sides[6])[None, :], (snaps, envs)).reshape(-1)[ids],
                              np.broadcast_to(np.asarray(sides[7])[None, :], (snaps, envs)).reshape(-1)[ids]], 1).astype(np.int8)
     out["map"] = np.broadcast_to(np.asarray(map_ids)[None, :], (snaps, envs)).reshape(-1)[ids]
+    out["env"] = np.broadcast_to(np.arange(envs, dtype=np.int32)[None, :], (snaps, envs)).reshape(-1)[ids]  # which game and
+    out["snap"] = np.broadcast_to(np.arange(snaps, dtype=np.int32)[:, None], (snaps, envs)).reshape(-1)[ids]  # how far into it
     out["z1"] = np.broadcast_to(np.asarray(z1)[None, :], (snaps, envs)).reshape(-1)[ids]
     out["greedy"] = np.stack([np.broadcast_to(np.asarray(sides[4])[None, :], (snaps, envs)).reshape(-1)[ids],
                               np.broadcast_to(np.asarray(sides[5])[None, :], (snaps, envs)).reshape(-1)[ids]], 1)
@@ -318,6 +320,7 @@ def cmd_gen(cfg):
                 w = (1.0 - winrate + 0.05) ** cfg.pfsp
                 j = int(rng.choice(len(pool), p=w / w.sum()))
             part, _, z1 = play_batch(cfg, bank, ids, rng, k, gen, pool[j][1] if pool else None)
+            part["game"] = part.pop("env") + b * n
             parts.append(part)
             row = dict(set=name, batch=b + 1, positions=len(part["z1"]), win1=round(float((z1 > 0).mean()), 3),
                        win2=round(float((z1 < 0).mean()), 3), seconds=round(time.time() - t0, 1))
@@ -355,6 +358,23 @@ def make_values(bank, heads, aux=False):
     return jax.vmap(one, in_axes=(None, 0, 0, 0, 0, 0))
 
 
+def td_returns(v, z, game, me, snap, lam):
+    """lambda-returns along each side's positions in each game: G = (1 - lam) * v(next position) + lam * G(next), and
+    the game's result after the last. v, z, game, me, snap: [rows], z from the mover's view."""
+    order = np.lexsort((snap, me, game))
+    v_o, z_o, g_o, m_o = v[order], z[order], game[order], me[order]
+    last = np.ones(len(order), bool)
+    last[:-1] = (g_o[1:] != g_o[:-1]) | (m_o[1:] != m_o[:-1])  # the last recorded position of that side in that game
+    ret = np.empty(len(order), np.float32)
+    nxt = 0.0
+    for i in range(len(order) - 1, -1, -1):  # numpy loop over ~10^6 rows: a few seconds
+        nxt = z_o[i] if last[i] else (1.0 - lam) * v_o[i + 1] + lam * nxt
+        ret[i] = nxt
+    out = np.empty_like(ret)
+    out[order] = ret
+    return out
+
+
 def cmd_train(cfg):
     bank = {k: jnp.asarray(v) for k, v in np.load(os.path.join(cfg.data, "maps.npz")).items()}
     train, val = load_set(os.path.join(cfg.data, "train.npz")), load_set(os.path.join(cfg.data, "val.npz"))
@@ -385,22 +405,42 @@ def cmd_train(cfg):
                     ships=np.concatenate([d["ships"][:, 0], d["ships"][:, 1]]),
                     tick=np.concatenate([d["tick"] + d["h"][:, 0], d["tick"] + d["h"][:, 1]]),
                     hand=np.concatenate([d["hand"][:, 0], d["hand"][:, 1]]), me=me, z=z,
+                    **({"game": np.concatenate([d["game"], d["game"]]), "snap": np.concatenate([d["snap"], d["snap"]])}
+                       if cfg.td_lambda else {}),
                     greedy=np.concatenate([d["greedy"][:, 0], d["greedy"][:, 1]]),
                     **({"dense": np.concatenate([d["dense"][:, 0], d["dense"][:, 1]])} if use_aux else {}))
-    tr, va = mover_arrays(train), mover_arrays(val)
+    tr_all, va_all = mover_arrays(train), mover_arrays(val)
     # drop positions where the mover was the greedy bot: its "chosen" position is just the planner's idea
-    keep_t, keep_v = ~tr["greedy"].astype(bool), ~va["greedy"].astype(bool)
-    tr = {k: v[keep_t] for k, v in tr.items()}
-    va = {k: v[keep_v] for k, v in va.items()}
+    keep_t, keep_v = ~tr_all["greedy"].astype(bool), ~va_all["greedy"].astype(bool)
+    tr = {k: v[keep_t] for k, v in tr_all.items() if k not in ("game", "snap")}
+    va = {k: v[keep_v] for k, v in va_all.items() if k not in ("game", "snap")}
+    ev = jax.jit(values)
+
+    def targets(params):
+        """What each kept position is trained towards: the game's result, or (td_lambda > 0) lambda-returns of the
+        network's own values of the side's later positions in the same game, the result coming in only at the end."""
+        if not cfg.td_lambda:
+            return tr["z"], va["z"]
+        out = []
+        for name, d, keep in (("train", tr_all, keep_t), ("held-out", va_all, keep_v)):
+            v = np.concatenate([np.asarray(ev(params, *(jnp.asarray(d[k][i:i + 8192]) for k in ("map", "owner", "ships", "tick", "me"))))
+                                for i in range(0, len(d["z"]), 8192)])
+            ret = td_returns(v, d["z"], d["game"], d["me"], d["snap"], cfg.td_lambda)
+            print(f"  {name}: lambda-returns, mean |return - value| {np.mean(np.abs(ret - v)):.4f}, "
+                  f"mean |return - result| {np.mean(np.abs(ret - d['z'])):.4f}", flush=True)
+            out.append(ret[keep])
+        return out
     n_tr = len(tr["z"])
     print(f"train positions {n_tr}, held-out {len(va['z'])}", flush=True)
     dev = lambda d: {k: jnp.asarray(v) for k, v in d.items()}  # noqa: E731
     tr_d, va_d = dev(tr), dev(va)
+    tr_tgt, va_tgt = targets(params)
+    tgt_d = jnp.asarray(tr_tgt)
     max_ticks = np.asarray(bank["max_ticks"])
 
-    def loss_fn(params, b, flip):
+    def loss_fn(params, b, target, flip):
         me = jnp.where(flip, 3 - b["me"], b["me"])
-        z = jnp.where(flip, -b["z"], b["z"])
+        z = jnp.where(flip, -target, target)
         if not n_aux:
             v = values(params, b["map"], b["owner"], b["ships"], b["tick"], me)
             return jnp.mean((v - z) ** 2)
@@ -409,14 +449,14 @@ def cmd_train(cfg):
         return jnp.mean((v - z) ** 2) + cfg.aux_weight * jnp.mean((aux - dense) ** 2)
 
     @jax.jit
-    def train_chunk(params, opt_state, key, lr):
+    def train_chunk(params, opt_state, key, lr, tgt):
         def step(c, k):
             params, opt_state = c
             k1, k2 = jax.random.split(k)
             ids = jax.random.randint(k1, (cfg.minibatch,), 0, n_tr)
             b = jax.tree.map(lambda x: x[ids], tr_d)
             flip = jax.random.uniform(k2, (cfg.minibatch,)) < cfg.flip
-            loss, g = jax.value_and_grad(loss_fn)(params, b, flip)
+            loss, g = jax.value_and_grad(loss_fn)(params, b, tgt[ids], flip)
             upd, opt_state = opt.update(g, opt_state, params)
             upd = jax.tree.map(lambda u: lr * u, upd)
             return (optax.apply_updates(params, upd), opt_state), loss
@@ -453,7 +493,10 @@ def cmd_train(cfg):
     print(f"hand score (tanh(score/{best[1]}) rescaled):", flush=True)
     base_row = metrics(best[2], va["z"], phase, "hand")
     print("start:", flush=True)
-    metrics(held_out(params), va["z"], phase, "net")
+    pred = held_out(params)
+    metrics(pred, va["z"], phase, "net")
+    if cfg.td_lambda:
+        print(f"  net vs lambda-returns: {json.dumps(dict(mse=round(float(np.mean((pred - va_tgt) ** 2)), 4)))}", flush=True)
     os.makedirs(cfg.out, exist_ok=True)
     key = jax.random.PRNGKey(cfg.seed)
     t0 = time.time()
@@ -462,15 +505,25 @@ def cmd_train(cfg):
     for c in range(n_chunks):
         lr = cfg.lr + (cfg.lr_end - cfg.lr) * c / max(n_chunks - 1, 1)
         key, k = jax.random.split(key)
-        params, opt_state, loss = train_chunk(params, opt_state, k, lr)
+        params, opt_state, loss = train_chunk(params, opt_state, k, lr, tgt_d)
         if (c + 1) % cfg.report_every == 0 or c + 1 == n_chunks:
             print(f"step {(c + 1) * cfg.chunk_steps} loss {float(loss):.4f} ({time.time() - t0:.0f}s)", flush=True)
-            row = metrics(held_out(params), va["z"], phase, "net")
+            pred = held_out(params)
+            row = metrics(pred, va["z"], phase, "net")
+            if cfg.td_lambda:  # kept by how well it predicts its own targets on held-out games
+                row = dict(mse=round(float(np.mean((pred - va_tgt) ** 2)), 4))
+                print(f"  net vs lambda-returns: {json.dumps(row)}", flush=True)
             save_params(os.path.join(cfg.out, "latest.npz"), params, argparse.Namespace(heads=heads))
-            if row["mse"] < best_mse:  # the network overfits the games it sees: keep the best on held-out games
+            if cfg.td_refresh:  # the targets move, so there is no best to keep: latest.npz is the result
+                pass
+            elif row["mse"] < best_mse:  # the network overfits the games it sees: keep the best on held-out games
                 best_mse = row["mse"]
                 save_params(os.path.join(cfg.out, "best.npz"), params, argparse.Namespace(heads=heads))
                 print(f"  (best so far at step {(c + 1) * cfg.chunk_steps})", flush=True)
+        if cfg.td_refresh and ((c + 1) * cfg.chunk_steps) % cfg.td_refresh == 0 and c + 1 < n_chunks:
+            print(f"step {(c + 1) * cfg.chunk_steps}: new lambda-returns from the network as it is now", flush=True)
+            tr_tgt, va_tgt = targets(params)
+            tgt_d = jnp.asarray(tr_tgt)
     json.dump(dict(hand=base_row), open(os.path.join(cfg.out, "hand.json"), "w"))
 
 
@@ -627,6 +680,9 @@ def main(argv=None):
     t.add_argument("--flip", type=float, default=0.25, help="share of samples shown from the other side's view")
     t.add_argument("--aux-weight", type=float, default=0.5, help="weight of the dense targets (how the real position scores "
                    "24, 48 and 96 ticks later) next to the game result; 0 turns them off")
+    t.add_argument("--td-lambda", type=float, default=0.0,
+                   help="train towards lambda-returns of the starting network's values along each game instead of the result")
+    t.add_argument("--td-refresh", type=int, default=0, help="recompute the lambda-returns with the network as it is every this many steps")
     t.add_argument("--seed", type=int, default=0)
     m = sub.add_parser("match")
     m.add_argument("value", help="value network .npz, or 'hand' for the hand-scored planner")
