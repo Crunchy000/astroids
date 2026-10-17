@@ -1,0 +1,4 @@
+RESULT a=remote8501 b=remote8502 a_wins=11.0 b_wins=21.0 games=32 a_timeouts=0 b_timeouts=0 a_ms=6.90 b_ms=11.93
+RESULT a=remote8511 b=titans a_wins=32.0 b_wins=0.0 games=32 a_timeouts=0 b_timeouts=0 a_ms=20.50 b_ms=2.24
+RESULT a=remote8512 b=titans a_wins=32.0 b_wins=0.0 games=32 a_timeouts=0 b_timeouts=0 a_ms=12.39 b_ms=1.35
+PROGRESS set 13/16: 33.0-19.0 of 52

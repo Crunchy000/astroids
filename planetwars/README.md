@@ -2,7 +2,7 @@
 
 An entry for Simon Lucas's [Planet Wars RTS](https://simonlucas.github.io/planet-wars-rts/) league.
 The entry served by default is an all-moves planner (`entry/planner.py`) whose best few launches are
-re-ranked by a small network trained on the results of planner games (`entry/value.npz`), checking the opponent's
+re-ranked by a small network (`entry/value.npz`, a faster copy of one trained on the results of planner games), checking the opponent's
 best answers to its eight best options before it picks one. Without that
 file, or with `PW_VALUE=off`, it ranks launches by a hand-written score alone. A neural network
 trained by self-play on a GPU is also in the repo (`PW_AGENT=neural`); the planner beats it in 57 of 60
@@ -24,7 +24,7 @@ planetwars/
     Dockerfile     their Python template: python:3.11-slim, port 8080
     main.py        GameServerAgent(host="0.0.0.0", port=8080, agent=PlannerAgent()); PW_AGENT=neural serves the network
     planner.py     the all-moves planner (numpy only), the default agent
-    value.npz      value network that re-ranks the planner's best launches (round 6, trained on planner games)
+    value.npz      value network that re-ranks the planner's best launches (a 2-layer copy of round 6, see below)
     agent.py       the neural agent (numpy only)
     pwnet.py       features + network, shared verbatim with training (numpy or jax.numpy)
     model.npz      trained weights (self-play iteration 450)
@@ -252,6 +252,27 @@ it (0.292 at best, step 200). The trained network lost to round 6, both looking 
 536 without look-ahead. The network seems to be at the limit of what a game's result can teach it about a position:
 its error is mostly in the opening (0.64 against 0.15 near the end), where the result is far off. About 16 Colab
 compute units.
+
+**A smaller copy of round 6.** The entry's time goes mostly on the network (about 0.8 ms a position on a 30-planet
+map), so with look-ahead the big maps re-ranked only about 50 launches. `python -m pwjax.distill` records the
+positions the entry asks about (the planner's best 64 launches and the opponent's answers, in games round 6 plays,
+about 850,000 positions) with round 6's value of each, and trains a smaller network to give the same numbers. Half as
+wide (64) is 2 times faster; half as wide with 2 layers instead of 3 is 2.9 times faster. Both copy round 6 closely
+on held-out positions (correlation 0.994, mean squared difference 0.007 and 0.008), which costs a little in play. In
+JAX, both looking ahead (8 options, 4 answers), against round 6:
+
+| Copy | Its launches | Round 6's launches | Score of 1,024 |
+|---|---|---|---|
+| 3 layers, 64 wide | 64 | 64 | 0.465 |
+| 2 layers, 64 wide | 64 | 64 | 0.479 |
+| 2 layers, 64 wide | 128 | 48 (what it affords on big maps) | 0.550 |
+| 2 layers, 64 wide | 128 | 64 | 0.503 |
+
+The entry now ships the 2-layer copy and re-ranks up to 128 launches (`PW_TOP`), with look-ahead: 48 ms a move on
+average on league maps, slowest 84 ms. In the real engine it won 44 of 84 games against the previous entry (round 6
+with look-ahead at 64 launches; 11 of the first 32, then 33 of 52 before the machine restarted), too few games to
+tell it from even, and beat TeamTitansAgentV3 in 64 of 64 with two series at once, no timeouts, slowest move 94 ms.
+The copy cost about 7 Colab compute units.
 
 The earlier value network in "A value function trained on game results (did not help)" below was asked a
 different question, which of the policy's own moves is worth most, and the policy's moves were not where

@@ -1,0 +1,2 @@
+{"step": 20000, "loss": 0.00245, "held_out_mse": 0.00712, "corr": 0.9944, "seconds": 163}
+{"step": 20000, "loss": 0.00367, "held_out_mse": 0.00764, "corr": 0.994, "seconds": 122}

@@ -1,0 +1,6 @@
+devices: [CudaDevice(id=0)]
+{"set": "val", "batch": 1, "positions": 212625, "seconds": 207.7}
+{"set": "train", "batch": 1, "positions": 220245, "seconds": 164.8}
+{"set": "train", "batch": 2, "positions": 215106, "seconds": 329.6}
+{"set": "train", "batch": 3, "positions": 214988, "seconds": 494.4}
+{"set": "train", "batch": 4, "positions": 210870, "seconds": 659.2}
