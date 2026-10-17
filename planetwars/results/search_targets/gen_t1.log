@@ -1,0 +1,6 @@
+devices: [CudaDevice(id=0)]
+{"set": "val", "batch": 1, "positions": 133223, "seconds": 186.7, "target_mean": 0.0183, "teacher_mean": -0.0342, "target_vs_teacher": 0.1325, "corr_result": 0.7259, "teacher_corr_result": 0.7466}
+{"set": "train", "batch": 1, "positions": 127108, "seconds": 140.0, "target_mean": 0.0154, "teacher_mean": -0.0416, "target_vs_teacher": 0.1369, "corr_result": 0.7492, "teacher_corr_result": 0.772}
+{"set": "train", "batch": 2, "positions": 131314, "seconds": 280.0, "target_mean": 0.0244, "teacher_mean": -0.0337, "target_vs_teacher": 0.1393, "corr_result": 0.7223, "teacher_corr_result": 0.7467}
+{"set": "train", "batch": 3, "positions": 129961, "seconds": 420.1, "target_mean": 0.0248, "teacher_mean": -0.0267, "target_vs_teacher": 0.1335, "corr_result": 0.7338, "teacher_corr_result": 0.753}
+{"set": "train", "batch": 4, "positions": 130506, "seconds": 560.1, "target_mean": 0.021, "teacher_mean": -0.0379, "target_vs_teacher": 0.1403, "corr_result": 0.7212, "teacher_corr_result": 0.7437}

@@ -274,6 +274,21 @@ with look-ahead at 64 launches; 11 of the first 32, then 33 of 52 before the mac
 tell it from even, and beat TeamTitansAgentV3 in 64 of 64 with two series at once, no timeouts, slowest move 94 ms.
 The copy cost about 7 Colab compute units.
 
+**Learning from the look-ahead (did not help).** Look-ahead was the biggest gain so far, so the next idea was to
+teach the network what the look-ahead concludes (search-bootstrapped values, as in TreeStrap): a network that already
+knows the opponent's best answer would rank all 128 launches better, and a look-ahead built on it would see further.
+`python -m pwjax.distill gen --target search` records the positions the entry asks about in games the shipped
+network plays (about 520,000), plays the look-ahead from each as the entry would (its best option against the
+opponent's best answer), and keeps the network's value of the position that leaves. The shipped network, trained on
+these for 10,000 more steps (`train --init`), learned them closely (held-out correlation 0.993), then lost to the
+shipped network, both at 128 launches and looking ahead, 283 to 741 (0.276). With a quarter of the game's result
+mixed into the target (`--outcome 0.25`) it lost 403 to 621 (0.394). The look-ahead's numbers predict the game's
+result worse than the network's own at every stage of the game (correlation 0.726 against 0.747 on held-out
+positions; 0.458 against 0.524 at ticks 150 to 300), and they differ from the network's most in the opening (0.30 on
+average at ticks 0 to 150), where they lean towards the side that moves first. So the look-ahead is good at spotting a
+launch the opponent can punish, but the position it ends on (one launch each, then nobody does anything for another
+90 ticks) is a worse guide to who wins than the network's view of the position before. About 4 Colab compute units.
+
 The earlier value network in "A value function trained on game results (did not help)" below was asked a
 different question, which of the policy's own moves is worth most, and the policy's moves were not where
 the gap was.
