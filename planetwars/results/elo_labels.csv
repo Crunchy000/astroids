@@ -16,3 +16,4 @@ evo_big,SimpleEvoAgent (60 evals)
 evo,SimpleEvoAgent (default)
 careful,CarefulRandomAgent
 better,BetterRandomAgent
+entry_oct18,Our entry now (Oct 18: look-ahead + self-predicting targets)

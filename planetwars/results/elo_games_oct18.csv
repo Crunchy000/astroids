@@ -1,0 +1,3 @@
+a,b,a_wins,b_wins,draws,source
+entry_oct18,egocentric,60,4,0,"Oct 18: entry with two rounds of self-predicting targets, PairEvalKt 16 sets x 2 per side, 200 ms"
+entry_oct18,titans,32,0,0,"Oct 17: same entry against TeamTitansAgentV3, PairEvalKt 8 sets x 2 per side, 200 ms"
