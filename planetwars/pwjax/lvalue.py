@@ -415,15 +415,21 @@ def cmd_train(cfg):
     tr = {k: v[keep_t] for k, v in tr_all.items() if k not in ("game", "snap")}
     va = {k: v[keep_v] for k, v in va_all.items() if k not in ("game", "snap")}
     ev = jax.jit(values)
+    if cfg.td_value:  # lambda-returns made with another network's values, fixed for the whole run
+        assert cfg.td_lambda and not cfg.td_refresh, "--td-value needs --td-lambda and no --td-refresh"
+        t_params, t_heads = evaluate.load(cfg.td_value)
+        ev_t = jax.jit(make_values(bank, t_heads))
 
     def targets(params):
         """What each kept position is trained towards: the game's result, or (td_lambda > 0) lambda-returns of the
-        network's own values of the side's later positions in the same game, the result coming in only at the end."""
+        network's own values (or --td-value's) of the side's later positions in the same game, the result coming in
+        only at the end."""
         if not cfg.td_lambda:
             return tr["z"], va["z"]
+        fn, p = (ev_t, t_params) if cfg.td_value else (ev, params)
         out = []
         for name, d, keep in (("train", tr_all, keep_t), ("held-out", va_all, keep_v)):
-            v = np.concatenate([np.asarray(ev(params, *(jnp.asarray(d[k][i:i + 8192]) for k in ("map", "owner", "ships", "tick", "me"))))
+            v = np.concatenate([np.asarray(fn(p, *(jnp.asarray(d[k][i:i + 8192]) for k in ("map", "owner", "ships", "tick", "me"))))
                                 for i in range(0, len(d["z"]), 8192)])
             ret = td_returns(v, d["z"], d["game"], d["me"], d["snap"], cfg.td_lambda)
             print(f"  {name}: lambda-returns, mean |return - value| {np.mean(np.abs(ret - v)):.4f}, "
@@ -682,6 +688,8 @@ def main(argv=None):
                    "24, 48 and 96 ticks later) next to the game result; 0 turns them off")
     t.add_argument("--td-lambda", type=float, default=0.0,
                    help="train towards lambda-returns of the starting network's values along each game instead of the result")
+    t.add_argument("--td-value", default="", help="make the lambda-returns with this network's values instead (a bigger network "
+                   "can learn a smaller one's)")
     t.add_argument("--td-refresh", type=int, default=0, help="recompute the lambda-returns with the network as it is every this many steps")
     t.add_argument("--seed", type=int, default=0)
     m = sub.add_parser("match")
