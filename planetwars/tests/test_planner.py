@@ -192,10 +192,10 @@ def test_numpy_value_ranking_matches_the_jax_agent():
     assert total >= 20 and same >= 0.85 * total, (same, total)
 
 
-@pytest.mark.parametrize("look", ["8:4", "8:4f"])
-def test_look_ahead_picks_like_the_jax_reply_agent(monkeypatch, look):
+@pytest.mark.parametrize("look,judged", [("8:4", False), ("8:4f", False), ("8:4f", True)])
+def test_look_ahead_picks_like_the_jax_reply_agent(monkeypatch, look, judged):
     """With the look-ahead on, the entry picks what pwjax.lvalue.make_reply_agent picks (ties aside), also with the
-    answers aimed at the planets each option changes ('f')."""
+    answers aimed at the planets each option changes ('f') and with a second network judging the look-ahead."""
     import jax
     import jax.numpy as jnp
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
@@ -204,8 +204,10 @@ def test_look_ahead_picks_like_the_jax_reply_agent(monkeypatch, look):
     monkeypatch.setattr(planner, "LOOK_SOURCES", 32)  # the JAX agent's opponent uses its `sources` too
     params = policy.init(jax.random.PRNGKey(2))
     np_params = {k: np.asarray(v, dtype=np.float64) for k, v in params.items()}
+    judge = policy.init(jax.random.PRNGKey(3)) if judged else None
+    np_judge = ({k: np.asarray(v, dtype=np.float64) for k, v in judge.items()}, 4, 1.0) if judged else None
     agent = jax.jit(lvalue.make_reply_agent(params, 4, 32, 90, 8, mix=0.5, extras=("spare",), ours=8, replies=4,
-                                            focus=look.endswith("f")))
+                                            focus=look.endswith("f"), judge=(judge, 4) if judged else None))
     bank = {k: jnp.asarray(v) for k, v in maps.make_bank(1, seed=9, param_fn=maps.cog2026_params).items()}
     s = env.from_bank(bank, 0)
     key = jax.random.PRNGKey(1)
@@ -215,7 +217,8 @@ def test_look_ahead_picks_like_the_jax_reply_agent(monkeypatch, look):
         if t % 10 == 5:
             for me in (1, 2):
                 ns = _numpy_view(s)
-                want = planner.plan_ranked(ns, me, np_params, 4, 90, planner.FRACTIONS, 8, 0.5, 1e9, ("spare",), look)
+                want = planner.plan_ranked(ns, me, np_params, 4, 90, planner.FRACTIONS, 8, 0.5, 1e9, ("spare",), look,
+                                           judge=np_judge)
                 got = tuple(np.asarray(x) for x in agent(s, me, k1))
                 total += 1
                 same += int((want is None and got[0] < 0) or (want is not None and (int(got[0]), int(got[1])) == want[:2]))

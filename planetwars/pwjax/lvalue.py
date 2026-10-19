@@ -136,17 +136,23 @@ def parse_reply(spec):
     return int(o), int(rp.rstrip("f")), focus, float(w[0]) if w else 1.0
 
 
-def look_ahead(plan_r, params, heads, s, me, h, out, plain, ours, mix, scale=200.0, weight=1.0, owners=None, v=None, focus=False):
+def look_ahead(plan_r, params, heads, s, me, h, out, plain, ours, mix, scale=200.0, weight=1.0, owners=None, v=None, focus=False,
+               rescore=None):
     """One reply deep: the `ours` best options by `plain` ([top + 1], waiting last, -inf where unusable) are each played
     on a copy of the game, `plan_r` (the opponent's planner) finds its best answers by its own hand score, and the
     network scores the position after each. Returns those options' indices [ours], best plain score first, and what
     each is worth: weight * (the worst of its own score and those after the answers) + (1 - weight) * its own score.
 
     Given the options' projected `owners` and network values `v` ([top + 1]), also returns, for each, the network's
-    value of the position where that worst case is reached (1 or -1 where that position is already won or lost)."""
+    value of the position where that worst case is reached (1 or -1 where that position is already won or lost).
+
+    `rescore(cand)`, if given, is what the chosen options are worth themselves (in place of `plain`): with a bigger
+    network judging the look-ahead (`params`, `heads`) while a smaller one picked the options."""
     top = plain.shape[0] - 1
     first, cand = jax.lax.top_k(plain, ours)                                       # [ours]
     usable = jnp.isfinite(first)
+    if rescore is not None:
+        first = jnp.where(usable, rescore(cand), -jnp.inf)
     launch = (cand < top) & usable
     j = jnp.minimum(cand, top - 1)
     acts = (jnp.where(launch, out["cand_src"][j], -1).astype(jnp.int32),
@@ -178,13 +184,15 @@ def look_ahead(plan_r, params, heads, s, me, h, out, plain, ours, mix, scale=200
 
 def make_reply_agent(params, heads, sources=12, horizon=90, top=8, mix=0.0, scale=200.0, wait=True,
                      fractions=jplanner.FRACTIONS, extras=(), ours=8, replies=3, weight=1.0, focus=False, mix_open=None,
-                     open_ticks=150):
+                     open_ticks=150, judge=None):
     """make_value_agent, looking one reply deep. The planner's projection assumes nobody launches anything more, so it
     cannot see a counter-attack on a planet a launch has just emptied. Here the `ours` best options by the mixed score
     (waiting included) are each played on a copy of the game, the opponent's planner finds its `replies` best answers
     to each by its own hand score, and the network scores the position after each answer. An option is then worth
     weight * (its worst case, the opponent not answering included) + (1 - weight) * (its plain score) (see look_ahead).
-    With `mix_open`, that weight of the hand score is used instead before tick `open_ticks`."""
+    With `mix_open`, that weight of the hand score is used instead before tick `open_ticks`. With `judge` (params, heads
+    of a second, bigger network) the options are still picked by the first network, but the judge scores them and the
+    positions after the answers: the bigger network's view where it decides the move, at a cost the entry can afford."""
     plan = jplanner.make_planner(sources, horizon, top, fractions, extras)
     plan_r = jplanner.make_planner(sources, horizon, replies, fractions, extras)
 
@@ -195,7 +203,13 @@ def make_reply_agent(params, heads, sources=12, horizon=90, top=8, mix=0.0, scal
         ok = ok & jnp.concatenate([jnp.ones(top, bool), jnp.array([wait])])
         m = mix if mix_open is None else jnp.where(s.tick < open_ticks, mix_open, mix)
         plain = jnp.where(ok, totals(s, me, owners, hand, v, m, scale), -jnp.inf)
-        cand, val = look_ahead(plan_r, params, heads, s, me, h, out, plain, ours, m, scale, weight, focus=focus)
+        if judge is None:
+            cand, val = look_ahead(plan_r, params, heads, s, me, h, out, plain, ours, m, scale, weight, focus=focus)
+        else:
+            def rescore(c):
+                return totals(s, me, owners[c], hand[c], net_values(judge[0], judge[1], s, me, owners[c], ships[c], h), m, scale)
+            cand, val = look_ahead(plan_r, judge[0], judge[1], s, me, h, out, plain, ours, m, scale, weight, focus=focus,
+                                   rescore=rescore)
         k = cand[jnp.argmax(val)]
         launch = (k < top) & ok[k]
         j = jnp.minimum(k, top - 1)
@@ -577,7 +591,8 @@ def opponent(name):
             ours, replies, focus, weight = parse_reply(opts["reply"])
             return make_reply_agent(params, heads, 12, 90, int(top[0]) if top else 8, float(mix), fractions=fractions, extras=extras,
                                     ours=ours, replies=replies, weight=weight, focus=focus,
-                                    mix_open=float(opts["mixopen"]) if "mixopen" in opts else None)
+                                    mix_open=float(opts["mixopen"]) if "mixopen" in opts else None,
+                                    judge=evaluate.load(opts["judge"]) if "judge" in opts else None)
         return make_value_agent(params, heads, 12, 90, int(top[0]) if top else 8, float(mix), fractions=fractions, extras=extras)
     if head.endswith(".npz"):
         pol, heads = evaluate.load(head)
@@ -647,10 +662,12 @@ def cmd_match(cfg):
             runs = []
             for spec in cfg.reply.split(","):
                 o, rp, focus, w = parse_reply(spec)
-                runs.append((f"mix={cfg.mix};reply={spec}" + (f";mixopen={cfg.mix_open}" if cfg.mix_open else ""), make_reply_agent(
+                runs.append((f"mix={cfg.mix};reply={spec}" + (f";mixopen={cfg.mix_open}" if cfg.mix_open else "")
+                             + (f";judge={cfg.judge}" if cfg.judge else ""), make_reply_agent(
                     params, heads, cfg.sources, cfg.horizon, cfg.top, float(cfg.mix), wait=not cfg.no_wait,
                     fractions=fractions, extras=extras, ours=o, replies=rp, weight=w, focus=focus,
-                    mix_open=float(cfg.mix_open) if cfg.mix_open else None)))
+                    mix_open=float(cfg.mix_open) if cfg.mix_open else None,
+                    judge=evaluate.load(cfg.judge) if cfg.judge else None)))
     for opp in cfg.vs.split(","):
         fb = opponent(opp)
         for name, agent in runs:
@@ -722,6 +739,8 @@ def main(argv=None):
     m.add_argument("--no-wait", action="store_true")
     m.add_argument("--reply", default="", help="OURS:REPLIES[:WEIGHT], comma separated: look one opponent reply deep "
                    "(see make_reply_agent); one run each, at the single --mix")
+    m.add_argument("--judge", default="", help="with --reply: a second (bigger) network that scores the look-ahead's options "
+                   "and answers (see make_reply_agent)")
     m.add_argument("--mix-open", default="", help="with --reply: the hand score's weight before tick 150 (default: --mix)")
     m.add_argument("--extras", default="", help="launch sizes beyond the fractions for the tested agent, '+' separated")
     m.add_argument("--fractions", default="", help="fractions of the source's ships for the tested agent")

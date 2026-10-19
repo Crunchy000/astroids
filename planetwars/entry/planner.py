@@ -35,6 +35,7 @@ MIX = float(os.environ.get("PW_MIX", "0.5"))    # weight of the hand score again
 MIX_OPEN = float(os.environ["PW_MIX_OPEN"]) if os.environ.get("PW_MIX_OPEN") else None  # that weight before tick OPEN_TICKS
 OPEN_TICKS = 150
 VALUE = os.environ.get("PW_VALUE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "value.npz"))
+JUDGE = os.environ.get("PW_JUDGE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "judge.npz"))  # see plan_ranked
 USE_POLICY = os.environ.get("PW_POLICY_CANDIDATE", "0") == "1"  # also try the neural policy's own move
 
 
@@ -428,7 +429,7 @@ def totals_of(params, heads, s, me, owners, shipss, hand, tick, mix):
 
 
 def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=TOP, mix=MIX, budget_ms=BUDGET_MS, extras=(),
-                look=LOOK, look_ms=LOOK_MS, mix_open=MIX_OPEN):
+                look=LOOK, look_ms=LOOK_MS, mix_open=MIX_OPEN, judge=None):
     """Like `plan`, but the best launches by hand score (and waiting) are re-ranked by the value network, mixed with
     the hand score as (1 - mix) * value + mix * tanh(hand / 200). Launches go through the network eight at a time,
     best hand score first, until `top` have been seen or `budget_ms` (counted from the start of this call) would be
@@ -439,12 +440,17 @@ def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=
     by its hand score (see `replies`). Re-ranking then stops early enough to leave time for that: `look_ms` plus, for
     scoring the OURS * REPLIES positions, the slowest batch of eight so far for every eight of them. If less time is
     left than that, fewer options look ahead (none if fewer than two would). With `mix_open`, that is the hand score's
-    weight before tick OPEN_TICKS."""
+    weight before tick OPEN_TICKS.
+
+    With `judge` (params, heads, its time per position over the network's), a second, bigger network scores the
+    look-ahead: the chosen options themselves and the positions after the answers, as pwjax.lvalue.make_reply_agent
+    does with `judge`. The time it needs is reserved the same way, scaled by that ratio."""
     started = time.perf_counter()
     if mix_open is not None and s.tick < OPEN_TICKS:
         mix = mix_open
     ours, n_rep = (int(x.rstrip("f")) for x in look.split(":")) if look else (0, 0)
     focus = look.endswith("f")
+    ratio, per_opt = (judge[2], n_rep + 1) if judge is not None else (1.0, n_rep)  # look-ahead cost per option, in positions
     c = candidates(s, me, horizon, fractions, None, extras, keep=ours > 0)
     if c is None:
         return None
@@ -452,7 +458,7 @@ def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=
     tick = s.tick + c["horizon"]
     seen_k, seen_t, took = [], [], 0.0
     for lo in range(0, len(order), CHUNK):
-        reserve = (look_ms + took * ours * n_rep / CHUNK) if ours else 0.0
+        reserve = (look_ms + took * ratio * ours * per_opt / CHUNK) if ours else 0.0
         if lo and (time.perf_counter() - started) * 1000 + took + reserve > budget_ms:
             break
         t0 = time.perf_counter()
@@ -467,12 +473,18 @@ def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=
     best = int(np.argmax(seen_t))  # the first best on a tie, as before
     if ours and took > 0:
         left = budget_ms - (time.perf_counter() - started) * 1000 - look_ms
-        ours = min(ours, int(left / (took / CHUNK)) // n_rep)
+        ours = min(ours, int(left / (took * ratio / CHUNK)) // per_opt)
     if ours >= 2:
         pick = np.argsort(-seen_t, kind="stable")[:ours]
         opts = seen_k[pick]
         r_own, r_sh, found, _ = replies(s, me, c, opts, fractions, extras, n_rep, LOOK_SOURCES, focus)
-        worst = seen_t[pick].copy()
+        if judge is None:
+            worst = seen_t[pick].copy()
+        else:  # the judge's own view of each option
+            params, heads = judge[0], judge[1]
+            worst = totals_of(params, heads, s, me, [c["owner"][k] if k >= 0 else c["base_owner"] for k in opts],
+                              [c["ships"][k] if k >= 0 else c["base_ships"] for k in opts],
+                              [c["score"][k] if k >= 0 else c["base"] for k in opts], tick, mix)
         if found.any():
             o_idx, r_idx = np.nonzero(found)
             ro, rs = r_own[o_idx, r_idx], r_sh[o_idx, r_idx]
@@ -485,17 +497,39 @@ def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=
     return int(c["ci"][k]), int(c["cj"][k]), float(c["cn"][k])
 
 
+def speed_ratio(net, judge, n=30, reps=5):
+    """How many times longer `judge` takes than `net` (each (params, heads)) per position, timed on a dummy batch."""
+    def took(params, heads):
+        g = pwnet.N_GLOBAL_FEATS
+        f = params["in.w"].shape[0] - g
+        planet, glob = np.zeros((CHUNK, n, f), np.float32), np.zeros((CHUNK, g), np.float32)
+        valid = np.ones((CHUNK, n), bool)
+        best = float("inf")
+        for _ in range(reps):
+            t0 = time.perf_counter()
+            pwnet.value_batch(np, params, heads, planet, glob, valid)
+            best = min(best, time.perf_counter() - t0)
+        return best
+    took(*net), took(*judge)  # warm up
+    return max(1.0, took(*judge) / took(*net))
+
+
 class PlannerAgent(NeuralAgent):
     """Tries every launch each tick (see the module docstring)."""
 
     def __init__(self, horizon=HORIZON, fractions=FRACTIONS, use_policy=USE_POLICY, value=VALUE, top=TOP, mix=MIX, budget_ms=BUDGET_MS, extras=SIZES,
-                 look=LOOK):
+                 look=LOOK, judge=JUDGE):
         super().__init__()
         self.horizon, self.fractions, self.use_policy, self.extras, self.look = horizon, tuple(fractions), use_policy, tuple(extras), look
         self.value, self.top, self.mix, self.budget_ms = None, top, mix, budget_ms
         if value and value != "off" and os.path.exists(value):
             params, heads = load(value)  # ranks the planner's best launches (single precision: twice as fast, same picks)
             self.value = ({k: v.astype(np.float32) for k, v in params.items()}, heads)
+        self.judge = None
+        if self.value is not None and look and judge and judge != "off" and os.path.exists(judge):
+            jp, jh = load(judge)
+            jp = {k: v.astype(np.float32) for k, v in jp.items()}
+            self.judge = (jp, jh, speed_ratio(self.value, (jp, jh)))
 
     def get_action(self, game_state):
         try:
@@ -510,7 +544,8 @@ class PlannerAgent(NeuralAgent):
                 extra = [(i, j, a)] if i >= 0 else None
             if self.value is not None and extra is None:
                 try:
-                    best = plan_ranked(s, me, *self.value, self.horizon, self.fractions, self.top, self.mix, self.budget_ms, self.extras, self.look)
+                    best = plan_ranked(s, me, *self.value, self.horizon, self.fractions, self.top, self.mix, self.budget_ms, self.extras, self.look,
+                                       judge=self.judge)
                 except Exception as e:  # fall back to the hand-written score
                     print("PlannerAgent value error:", repr(e), flush=True)
                     best = plan(s, me, self.horizon, self.fractions, extras=self.extras)
