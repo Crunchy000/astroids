@@ -318,6 +318,31 @@ to 0.2887), so the gains look to be thinning. The second-round network beat Team
 `entry/value.npz` (same shape, so the same speed). About 4 Colab
 compute units (`results/td/round2`).
 
+**Why we lose to EgoCentric.** The entry beats EgoCentric in about 94 games of 100, so its losses were studied
+game by game. `tools/TracePair.kt` plays two remote agents on seeded maps, both sides, and writes the full state and
+both moves of every tick; `tools/trace/` summarises such games (`loss.py`), asks the entry's planner about any of their
+positions (`replay.py`) and compares lost games with won ones (`early.py`, `neutrals.py`, `fleets.py`). Of 180 games
+on 90 maps the entry lost 10, and three maps from both sides (`results/losses`). Seven losses were wipe-outs before
+tick 830, and in nine the entry was behind in growth by tick 100. In lost games EgoCentric took more of the neutral
+planets in the first 60 ticks (1.0 a game against our 0.6; in won games 0.7 against our 0.97). The look-ahead often
+missed the reply that punished our move: the opponent's four best answers by its hand score were the same few
+launches for every option (three sizes of one launch at one planet), not a raid on the planet our launch emptied or a
+reinforcement of the one it attacked. So `8:4f` (`PW_LOOK`, `--reply`) reserves two of the four answers for the
+opponent's best launch at the option's target and at its source. Replayed on the seven lost maps the entry lost 11 of
+14 again, and with `8:4f` won 12 of 14, but on all 90 maps it scored 169 of 180 against 170: it won 8 games the entry
+lost and lost 9 it won. In JAX it scored 0.518 against the entry (1,024 games). Weighting the hand score more in the
+first 150 ticks (`--mix-open 0.8`, `PW_MIX_OPEN`) also won 12 of 14 on the lost maps, and lost 0.344 to the entry.
+Any change of play moves which of the close maps are lost, so neither is used; the entry is unchanged.
+
+**A bigger network.** 8,000 games played with look-ahead (`gen --reply 8:4`, the shipped network looking ahead in
+half the sides) trained round 6's size (128 wide, 3 layers, five times the parameters) from round 6 for 4,000 steps,
+towards the shipped network's λ-returns (`lvalue train --td-value`). In JAX, both looking ahead at 128 launches, it
+beat the shipped network 0.534 (547 to 477), but it takes 3.4 times as long a position (0.7 ms against 0.23 here,
+and batching more positions does not help: the time is arithmetic). At the 48 launches it can afford it scored 0.487.
+Letting it judge only the look-ahead (`PW_JUDGE`, `--judge`: the small network picks the 8 options, the big one scores
+them and the answers to them, about 30 ms a move) scored 0.510 against the same agent without it, within noise. A third
+round for the small network on the same games lost (0.459). About 15 Colab compute units (`results/bigger`).
+
 The earlier value network in "A value function trained on game results (did not help)" below was asked a
 different question, which of the policy's own moves is worth most, and the policy's moves were not where
 the gap was.
