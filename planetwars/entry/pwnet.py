@@ -8,6 +8,8 @@ runs the identical code with jax.numpy. Everything works on one unbatched game:
 The policy picks one (source, destination) pair or "do nothing", then one of `N_AMOUNTS` fleet sizes.
 Positions are mirrored for Player 2, so the network always sees itself starting on the left.
 """
+import numpy as np
+
 WIDTH, HEIGHT = 640.0, 480.0
 FRACTIONS = (0.25, 0.5, 0.75, 1.0)
 N_AMOUNTS = len(FRACTIONS) + 2  # plus "just enough to win" and "enough with a margin"
@@ -167,6 +169,87 @@ def value_batch(xp, params, heads, planet, glob, valid):
     pooled = xp.sum(h * vf, axis=1) / xp.maximum(xp.sum(vf, axis=1), 1.0)
     g = _relu(xp, xp.concatenate([pooled, glob], axis=-1) @ p["g.w"] + p["g.b"])
     return (_relu(xp, g @ p["v1.w"] + p["v1.b"]) @ p["v2.w"] + p["v2.b"])[..., 0]
+
+
+_PREPARED = {}
+
+
+def prepare(params, heads):
+    """The value path's weights rearranged for `value_fast` (numpy only, cached per params dict): q, k and v as one
+    matrix with the attention scale folded into q, each layer norm's gain and bias folded into the matrix after it,
+    and the input matrix split so the global features go through it once per position, not once per planet."""
+    key = id(params)
+    if key in _PREPARED and _PREPARED[key][0] is params:
+        return _PREPARED[key][1]
+    p = {k: np.asarray(v) for k, v in params.items()}
+    dt = p["in.w"].dtype
+    f = N_PLANET_FEATS
+    dm = p["in.w"].shape[1]
+    scale = 1.0 / (dm // heads) ** 0.5
+    out = dict(heads=heads, w_planet=p["in.w"][:f], w_glob=p["in.w"][f:], b_in=p["in.b"], layers=[])
+    for i in range(n_layers(p)):
+        g1, b1 = p[f"l{i}.ln1.g"], p[f"l{i}.ln1.b"]
+        wqkv = np.concatenate([p[f"l{i}.wq"] * scale, p[f"l{i}.wk"], p[f"l{i}.wv"]], axis=1)
+        g2, b2 = p[f"l{i}.ln2.g"], p[f"l{i}.ln2.b"]
+        out["layers"].append(dict(
+            wqkv=(g1[:, None] * wqkv).astype(dt), bqkv=(b1 @ wqkv).astype(dt),
+            wo=p[f"l{i}.wo"], bo=p[f"l{i}.bo"],
+            w1=(g2[:, None] * p[f"l{i}.w1"]).astype(dt), b1=(b2 @ p[f"l{i}.w1"] + p[f"l{i}.b1"]).astype(dt),
+            w2=p[f"l{i}.w2"], b2=p[f"l{i}.b2"]))
+    gw = p["g.w"]
+    out.update(w_pool=(p["out.ln.g"][:, None] * gw[:dm]).astype(dt), w_gglob=gw[dm:],
+               b_g=(p["out.ln.b"] @ gw[:dm] + p["g.b"]).astype(dt),
+               v1w=p["v1.w"], v1b=p["v1.b"], v2w=p["v2.w"], v2b=p["v2.b"])
+    _PREPARED[key] = (params, out)
+    return out
+
+
+def _norm(x):
+    """Layer norm of the rows of a 2-D array, without gain and bias (those are folded into the next matrix by `prepare`)."""
+    c = x - x.mean(axis=-1, keepdims=True)
+    var = np.einsum("ij,ij->i", c, c)[:, None] * (1.0 / x.shape[-1])
+    c *= 1.0 / np.sqrt(var + 1e-5)
+    return c
+
+
+def value_fast(prep, planet, glob, valid):
+    """`value_batch` with numpy, from `prepare`d weights: the same numbers (to float rounding), faster. Positions are
+    kept as one [B * N, D] matrix so each layer is a single matrix product, and the mask is skipped when every planet
+    is valid (always so in the entry, which never pads)."""
+    b, n, f = planet.shape
+    heads = prep["heads"]
+    h = (planet.reshape(b * n, f) @ prep["w_planet"]).reshape(b, n, -1)
+    h += (glob @ prep["w_glob"] + prep["b_in"])[:, None, :]
+    dm = h.shape[-1]
+    dh = dm // heads
+    h = h.reshape(b * n, dm)
+    full = bool(valid.all())
+    mask = None if full else np.where(valid, 0.0, NEG).astype(h.dtype)[:, None, None, :]   # [B, 1, 1, N] added to the scores
+    for L in prep["layers"]:
+        qkv = _norm(h) @ L["wqkv"]
+        qkv += L["bqkv"]
+        qkv = np.ascontiguousarray(qkv.reshape(b, n, 3, heads, dh).transpose(2, 0, 3, 1, 4))   # [3, B, heads, N, dh]
+        att = qkv[0] @ qkv[1].swapaxes(-1, -2)
+        if mask is not None:
+            att += mask
+        att -= att.max(axis=-1, keepdims=True)
+        np.exp(att, out=att)
+        att *= 1.0 / att.sum(axis=-1, keepdims=True)
+        h = h + (att @ qkv[2]).transpose(0, 2, 1, 3).reshape(b * n, dm) @ L["wo"]
+        h += L["bo"]
+        u = _norm(h) @ L["w1"]
+        u += L["b1"]
+        np.maximum(u, 0.0, out=u)
+        h += u @ L["w2"]
+        h += L["b2"]
+    hn = _norm(h).reshape(b, n, dm)
+    if full:
+        pooled = hn.mean(axis=1)
+    else:
+        vf = valid.astype(h.dtype)[..., None]
+        pooled = (hn * vf).sum(axis=1) / np.maximum(vf.sum(axis=1), 1.0)
+    g = np.maximum(pooled @ prep["w_pool"] + glob @ prep["w_gglob"] + prep["b_g"], 0.0)
+    return (np.maximum(g @ prep["v1w"] + prep["v1b"], 0.0) @ prep["v2w"] + prep["v2b"])[..., 0]
 
 
 def forward(xp, params, heads, planet, glob, pair, valid, pair_ok):

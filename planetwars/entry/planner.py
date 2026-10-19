@@ -63,14 +63,14 @@ def tick_rule(owner, ships, growth, p1, p2):
 
 
 def run(owner, ships, growth, a1, a2):
-    """The rules for a planet given the ships each player lands on it at each tick. Shapes: [M] and [H, M]."""
-    for k in range(a1.shape[0]):
-        p1, p2 = a1[k], a2[k]
-        if not ((p1 > 0) | (p2 > 0)).any():
-            ships = np.where(owner == 0, ships, ships + growth)
-            continue
-        owner, ships = tick_rule(owner, ships, growth, p1, p2)
-    return owner, ships
+    """The rules for a planet given the ships each player lands on it at each tick. Shapes: [M] and [H, M]. Only ticks
+    with landings are stepped: in between, an owned planet just grows."""
+    cur = 0
+    for k in np.nonzero(((a1 > 0) | (a2 > 0)).any(1))[0]:
+        ships = np.where(owner == 0, ships, ships + growth * (k - cur))
+        owner, ships = tick_rule(owner, ships, growth, a1[k], a2[k])
+        cur = k + 1
+    return owner, np.where(owner == 0, ships, ships + growth * (a1.shape[0] - cur))
 
 
 def settle(owner, ships, growth, start, ticks, p1, p2, horizon):
@@ -105,12 +105,25 @@ def parse_size(spec):
 
 def base_states(owner, ships, growth, a1, a2):
     """[H, n] owners and ships of every planet just before each tick of the nobody-launches projection."""
-    po, ps = [], []
-    for k in range(a1.shape[0]):
-        po.append(owner)
-        ps.append(ships)
-        owner, ships = run(owner, ships, growth, a1[k:k + 1], a2[k:k + 1])
-    return np.array(po), np.array(ps)
+    h = a1.shape[0]
+    po, ps = np.empty((h,) + owner.shape, owner.dtype), np.empty((h,) + ships.shape)
+    cur = 0
+    for k in [*np.nonzero(((a1 > 0) | (a2 > 0)).any(1))[0], h]:  # the ticks with landings, then the end
+        end = min(k + 1, h)                                        # until then owners hold and owned planets grow
+        po[cur:end] = owner
+        ps[cur:end] = ships + np.arange(end - cur)[:, None] * np.where(owner == 0, 0.0, growth)
+        if k < h:
+            owner, ships = tick_rule(owner, ps[k], growth, a1[k], a2[k])
+            cur = k + 1
+    return po, ps
+
+
+def landing_ticks(a1, a2):
+    """[n, E] the ticks in which fleets in flight land on each planet, ascending, padded with the horizon H."""
+    h = a1.shape[0]
+    busy = (a1 + a2) > 0
+    ticks = np.sort(np.where(busy, np.arange(h)[:, None], h).T, -1)
+    return ticks[:, :max(int(busy.sum(0).max()), 1)]
 
 
 def arrivals(s, horizon):
@@ -141,25 +154,34 @@ def score(owner, ships, s, me, near):
     return sc
 
 
-def project(s, me, horizon, ci, cj, cn, a1, a2, base_owner, base_ships, d):
-    """Owners and ships of every planet, `horizon` ticks after each candidate launch (source ci, target cj, ships cn)."""
-    c = ci.size
+def project(s, me, horizon, ci, cj, cn, a1, a2, po, ps, base_owner, base_ships, d):
+    """Owners and ships of every planet, `horizon` ticks after each candidate launch (source ci, target cj, ships cn).
+    Only those two planets differ from the nobody-launches projection (po, ps before each tick; base_owner and
+    base_ships after), and each is stepped through just its own landings (see `settle`)."""
+    h, c = horizon, ci.size
+    ticks = landing_ticks(a1, a2)
+    # target planet: as projected until this fleet lands, then through that landing and the later ones
     k_arr = arrival_step(d[ci, cj], s.radius[cj], s.speed)
-    # target planet: the existing arrivals plus this fleet
-    t1, t2 = a1[:, cj].copy(), a2[:, cj].copy()
-    land = k_arr < horizon
-    (t1 if me == 1 else t2)[k_arr[land], np.nonzero(land)[0]] += cn[land]
+    land = k_arr < h
+    kc = np.minimum(k_arr, h - 1)
+    ev = np.concatenate([kc[:, None], np.sort(np.where(ticks[cj] > kc[:, None], ticks[cj], h), -1)], 1)
+    evc, live = np.minimum(ev, h - 1), ev < h
+    p1 = np.where(live, a1[evc, cj[:, None]], 0.0)
+    p2 = np.where(live, a2[evc, cj[:, None]], 0.0)
+    (p1 if me == 1 else p2)[:, 0] += cn
+    t_own, t_sh = settle(po[kc, cj], ps[kc, cj], s.growth[cj], kc, ev, p1, p2, h)
     # source planet: launching leaves it with fewer ships to meet whatever arrives
-    s1, s2 = a1[:, ci], a2[:, ci]
-    owner = np.concatenate([s.owner[cj], s.owner[ci]])
-    ships = np.concatenate([s.ships[cj], s.ships[ci] - cn])
-    growth = np.concatenate([s.growth[cj], s.growth[ci]])
-    f_owner, f_ships = run(owner, ships, growth, np.concatenate([t1, s1], axis=1), np.concatenate([t2, s2], axis=1))
+    sev = ticks[ci]
+    sevc, slive = np.minimum(sev, h - 1), sev < h
+    q1 = np.where(slive, a1[sevc, ci[:, None]], 0.0)
+    q2 = np.where(slive, a2[sevc, ci[:, None]], 0.0)
+    s_own, s_sh = settle(s.owner[ci].copy(), s.ships[ci] - cn, s.growth[ci], np.zeros(c), sev, q1, q2, h)
     all_owner = np.tile(base_owner, (c, 1))
     all_ships = np.tile(base_ships, (c, 1))
     rows = np.arange(c)
-    all_owner[rows, cj], all_ships[rows, cj] = f_owner[:c], f_ships[:c]
-    all_owner[rows, ci], all_ships[rows, ci] = f_owner[c:], f_ships[c:]
+    all_owner[rows, cj] = np.where(land, t_own, base_owner[cj])
+    all_ships[rows, cj] = np.where(land, t_sh, base_ships[cj])
+    all_owner[rows, ci], all_ships[rows, ci] = s_own, s_sh
     return all_owner, all_ships
 
 
@@ -177,19 +199,15 @@ def candidates(s, me, horizon=HORIZON, fractions=FRACTIONS, extra=None, extras=(
     a1, a2 = arrivals(s, horizon)
     d = np.sqrt(((s.pos[:, None, :] - s.pos[None, :, :]) ** 2).sum(-1))
     near = (d <= 160.0) & ~np.eye(n, dtype=bool)
-    base_owner, base_ships = run(s.owner.copy(), s.ships.copy(), s.growth, a1, a2)
+    po, ps = base_states(s.owner.copy(), s.ships.copy(), s.growth, a1, a2)
+    base_owner, base_ships = run(po[-1], ps[-1], s.growth, a1[-1:], a2[-1:])
     base = score(base_owner[None, :], base_ships[None, :], s, me, near)[0]
 
     srcs = np.nonzero((s.owner == me) & ~s.tr_on & (s.ships >= 1.0))[0]
     if srcs.size == 0:
         return None
     sizes = [parse_size(e) for e in extras]
-    po = ps = None
-    if keep:
-        po, ps = base_states(s.owner.copy(), s.ships.copy(), s.growth, a1, a2)
     if any(k != "f" for k, _ in sizes):  # sizes worked out from the projection
-        if po is None:
-            po, ps = base_states(s.owner.copy(), s.ships.copy(), s.growth, a1, a2)
         k_all = arrival_step(d, s.radius[None, :], s.speed)                      # [n, n] tick a fleet from i lands on j
         kk = np.minimum(k_all, horizon - 1)
         cols = np.arange(n)[None, :]
@@ -225,7 +243,7 @@ def candidates(s, me, horizon=HORIZON, fractions=FRACTIONS, extra=None, extras=(
     if not ci:
         return None
     ci, cj, cn = np.concatenate(ci), np.concatenate(cj), np.concatenate(cn)
-    all_owner, all_ships = project(s, me, horizon, ci, cj, cn, a1, a2, base_owner, base_ships, d)
+    all_owner, all_ships = project(s, me, horizon, ci, cj, cn, a1, a2, po, ps, base_owner, base_ships, d)
     out = dict(ci=ci, cj=cj, cn=cn, owner=all_owner, ships=all_ships, score=score(all_owner, all_ships, s, me, near),
                base_owner=base_owner, base_ships=base_ships, base=base, horizon=horizon)
     if keep:
@@ -380,42 +398,47 @@ def value_of(params, heads, s, me, owner, ships, tick):
     return float(value_many(params, heads, s, me, [owner], [ships], tick)[0])
 
 
-def still_features(s, me, owners, shipss, tick):
+def still_features(s, me, owners, shipss, tick, dtype=float):
     """pwnet.features for several positions of the same game with no fleets in flight, all at once: planet [B, N, F]
     and global [B, G] features (the same numbers as `pwnet.features` on each; checked in tests/test_planner.py)."""
     o, sh = np.asarray(owners), np.asarray(shipss, dtype=float)
-    valid = s.valid[None, :]
-    vf = np.broadcast_to(valid.astype(float), sh.shape)
-    mine, opp, neu = valid & (o == me), valid & (o == 3 - me), valid & (o == 0)
+    b, n = sh.shape
+    valid = s.valid
+    mine, opp = valid & (o == me), valid & (o == 3 - me)
     x = (pwnet.WIDTH - s.pos[:, 0]) if me == 2 else s.pos[:, 0]
     y = (pwnet.HEIGHT - s.pos[:, 1]) if me == 2 else s.pos[:, 1]
-    zero = np.zeros_like(sh)
-    rows = lambda v: np.broadcast_to(v[None, :], sh.shape)  # noqa: E731
-    planet = np.stack([
-        vf, mine.astype(float), opp.astype(float), neu.astype(float), sh / 50.0, np.log1p(sh) / 4.0,
-        rows(s.growth * 10.0), rows(x / pwnet.WIDTH), rows(y / pwnet.HEIGHT),
-        zero, zero, zero, zero, zero, zero, zero, zero, zero,   # fleets: none in flight
-        np.where(mine, 1.0, -1.0) * sh / 50.0, (mine & (sh >= 1.0)).astype(float), rows(s.radius / 40.0),
-    ], axis=-1) * vf[..., None]
-    my_total, opp_total = np.where(mine, sh, 0.0).sum(1), np.where(opp, sh, 0.0).sum(1)
-    my_growth, opp_growth = np.where(mine, s.growth, 0.0).sum(1), np.where(opp, s.growth, 0.0).sum(1)
-    n_valid = max(float(s.valid.sum()), 1.0)
-    b = sh.shape[0]
+    planet = np.zeros((b, n, pwnet.N_PLANET_FEATS), dtype)  # columns 9 to 17 describe fleets: none in flight
+    shv = sh * valid
+    planet[:, :, 0] = valid
+    planet[:, :, 1] = mine
+    planet[:, :, 2] = opp
+    planet[:, :, 3] = valid & (o == 0)
+    planet[:, :, 4] = shv / 50.0
+    planet[:, :, 5] = np.log1p(shv) / 4.0
+    planet[:, :, 6] = s.growth * 10.0 * valid
+    planet[:, :, 7] = x / pwnet.WIDTH * valid
+    planet[:, :, 8] = y / pwnet.HEIGHT * valid
+    planet[:, :, 18] = np.where(mine, shv, -shv) / 50.0
+    planet[:, :, 19] = mine & (sh >= 1.0)
+    planet[:, :, 20] = s.radius / 40.0 * valid
+    my_total, opp_total = (sh * mine).sum(1), (sh * opp).sum(1)
+    my_growth, opp_growth = mine @ s.growth, opp @ s.growth
+    n_valid = max(float(valid.sum()), 1.0)
     tick, max_ticks = float(tick), float(s.max_ticks)
-    glob = np.stack([
-        np.full(b, tick / max_ticks), np.full(b, (max_ticks - tick) / 1000.0), np.full(b, s.speed / 5.0), np.full(b, n_valid / 30.0),
-        my_total / (my_total + opp_total + 1.0), my_growth / (my_growth + opp_growth + 1e-6),
-        mine.sum(1) / n_valid, opp.sum(1) / n_valid, np.log1p(my_total + opp_total) / 8.0,
-    ], axis=-1)
+    glob = np.empty((b, pwnet.N_GLOBAL_FEATS), dtype)
+    glob[:, 0], glob[:, 1], glob[:, 2], glob[:, 3] = tick / max_ticks, (max_ticks - tick) / 1000.0, s.speed / 5.0, n_valid / 30.0
+    glob[:, 4] = my_total / (my_total + opp_total + 1.0)
+    glob[:, 5] = my_growth / (my_growth + opp_growth + 1e-6)
+    glob[:, 6], glob[:, 7] = mine.sum(1) / n_valid, opp.sum(1) / n_valid
+    glob[:, 8] = np.log1p(my_total + opp_total) / 8.0
     return planet, glob
 
 
 def value_many(params, heads, s, me, owners, shipss, tick):
     """`value_of` for several positions of the same game at once (one batched pass through the network)."""
-    planet, glob = still_features(s, me, owners, shipss, tick)
-    dt = next(iter(params.values())).dtype
+    planet, glob = still_features(s, me, owners, shipss, tick, next(iter(params.values())).dtype)
     valid = np.broadcast_to(s.valid, (len(owners), s.valid.shape[0]))
-    return pwnet.value_batch(np, params, heads, planet.astype(dt), glob.astype(dt), valid)
+    return pwnet.value_fast(pwnet.prepare(params, heads), planet, glob, valid)
 
 
 def totals_of(params, heads, s, me, owners, shipss, hand, tick, mix):
@@ -456,20 +479,30 @@ def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=
         return None
     order = np.argsort(-c["score"], kind="stable")[:top]
     tick = s.tick + c["horizon"]
-    seen_k, seen_t, took = [], [], 0.0
-    for lo in range(0, len(order), CHUNK):
+    # launches that leave the map the same (say, fleets that land after the horizon) are scored once, at the first
+    _, first, same = np.unique(np.concatenate([c["owner"][order], c["ships"][order]], 1), axis=0, return_index=True,
+                               return_inverse=True)
+    rep = first[same.reshape(-1)]                                                 # each launch's first like it
+    fresh = np.nonzero(rep == np.arange(order.size))[0]
+    tot, done, took = np.zeros(order.size), np.zeros(order.size, bool), 0.0
+    for lo in range(0, fresh.size, CHUNK):
         reserve = (look_ms + took * ratio * ours * per_opt / CHUNK) if ours else 0.0
         if lo and (time.perf_counter() - started) * 1000 + took + reserve > budget_ms:
             break
         t0 = time.perf_counter()
-        idx = order[lo:lo + CHUNK]
+        idx = order[fresh[lo:lo + CHUNK]]
         owners = [c["owner"][k] for k in idx] + ([c["base_owner"]] if lo == 0 else [])
         shipss = [c["ships"][k] for k in idx] + ([c["base_ships"]] if lo == 0 else [])
         hand = np.concatenate([c["score"][idx], [c["base"]] if lo == 0 else []])
-        seen_t.append(totals_of(params, heads, s, me, owners, shipss, hand, tick, mix))
-        seen_k += [int(k) for k in idx] + ([-1] if lo == 0 else [])
+        t = totals_of(params, heads, s, me, owners, shipss, hand, tick, mix)
+        tot[fresh[lo:lo + CHUNK]], done[fresh[lo:lo + CHUNK]] = t[:idx.size], True
+        if lo == 0:
+            wait = t[-1]
         took = max(took, (time.perf_counter() - t0) * 1000)
-    seen_k, seen_t = np.array(seen_k), np.concatenate(seen_t)
+    seen = np.nonzero(done[rep])[0]                                               # launches scored, best hand first
+    cut = int(np.searchsorted(seen, CHUNK))                                       # waiting goes after the first eight
+    seen_k = np.concatenate([order[seen[:cut]], [-1], order[seen[cut:]]]).astype(int)
+    seen_t = np.concatenate([tot[rep[seen[:cut]]], [wait], tot[rep[seen[cut:]]]])
     best = int(np.argmax(seen_t))  # the first best on a tie, as before
     if ours and took > 0:
         left = budget_ms - (time.perf_counter() - started) * 1000 - look_ms
@@ -507,7 +540,7 @@ def speed_ratio(net, judge, n=30, reps=5):
         best = float("inf")
         for _ in range(reps):
             t0 = time.perf_counter()
-            pwnet.value_batch(np, params, heads, planet, glob, valid)
+            pwnet.value_fast(pwnet.prepare(params, heads), planet, glob, valid)
             best = min(best, time.perf_counter() - t0)
         return best
     took(*net), took(*judge)  # warm up

@@ -36,13 +36,14 @@ def test_projection_matches_the_engine():
                 a1, a2 = planner.arrivals(s, horizon)
                 d = np.sqrt(((s.pos[:, None, :] - s.pos[None, :, :]) ** 2).sum(-1))
                 bo, bs = planner.run(s.owner.copy(), s.ships.copy(), s.growth, a1, a2)
+                po, ps = planner.base_states(s.owner.copy(), s.ships.copy(), s.growth, a1, a2)
                 srcs = np.nonzero((s.owner == me) & ~s.tr_on & (s.ships >= 1))[0]
                 if srcs.size == 0:
                     continue
                 ci = rng.choice(srcs, 8)
                 cj = np.array([rng.choice([j for j in range(n) if j != i]) for i in ci])
                 cn = np.maximum(1.0, np.floor(s.ships[ci] * rng.choice([0.25, 0.5, 1.0], 8)))
-                ao, ash = planner.project(s, me, horizon, ci, cj, cn, a1, a2, bo, bs, d)
+                ao, ash = planner.project(s, me, horizon, ci, cj, cn, a1, a2, po, ps, bo, bs, d)
                 for k in range(8):
                     sim = ForwardModel(copy.deepcopy(gs), params)
                     player = Player.Player1 if me == 1 else Player.Player2
@@ -118,6 +119,7 @@ def test_jax_planner_scores_like_the_numpy_one():
                     d = np.sqrt(((ns.pos[:, None, :] - ns.pos[None, :, :]) ** 2).sum(-1))
                     near = (d <= 160.0) & ~np.eye(n, dtype=bool)
                     bo, bs = planner.run(ns.owner.copy(), ns.ships.copy(), ns.growth, a1, a2)
+                    po, ps = planner.base_states(ns.owner.copy(), ns.ships.copy(), ns.growth, a1, a2)
                     np.testing.assert_allclose(float(out["base"]), planner.score(bo[None], bs[None], ns, me, near)[0], rtol=1e-4, atol=1e-2)
                     np.testing.assert_array_equal(np.asarray(out["base_owner"])[:n], bo)
                     want = planner.plan(ns, me, horizon)
@@ -129,7 +131,7 @@ def test_jax_planner_scores_like_the_numpy_one():
                         continue
                     # same best score, even where two moves tie
                     def value(i, j, c):
-                        ao, ash = planner.project(ns, me, horizon, np.array([i]), np.array([j]), np.array([c], float), a1, a2, bo, bs, d)
+                        ao, ash = planner.project(ns, me, horizon, np.array([i]), np.array([j]), np.array([c], float), a1, a2, po, ps, bo, bs, d)
                         return planner.score(ao, ash, ns, me, near)[0]
                     np.testing.assert_allclose(value(int(src), int(dst), float(ships)), value(*want), rtol=1e-4, atol=1e-2)
                     np.testing.assert_allclose(float(out["best"]), value(*want), rtol=1e-4, atol=1e-2)
@@ -350,3 +352,20 @@ def test_batched_value_matches_one_position_at_a_time():
             np.testing.assert_allclose(planet[k], p1, rtol=1e-12, atol=1e-12)
             np.testing.assert_allclose(glob[k], g1, rtol=1e-12, atol=1e-12)
             np.testing.assert_allclose(fast[k], pwnet.value_only(np, net, heads, p1, g1, s.valid), rtol=1e-9, atol=1e-9)
+
+
+@pytest.mark.parametrize("padded", [False, True])
+def test_fast_value_matches_value_batch(padded):
+    """pwnet.value_fast (weights rearranged by pwnet.prepare) gives value_batch's numbers, with and without padding."""
+    import pwnet
+    net, heads = entry_agent.load(str(ENTRY / "value.npz"))
+    net = {k: v.astype(np.float64) for k, v in net.items()}
+    rng = np.random.default_rng(3)
+    planet = rng.normal(size=(5, 17, pwnet.N_PLANET_FEATS))
+    glob = rng.normal(size=(5, pwnet.N_GLOBAL_FEATS))
+    valid = np.ones((5, 17), bool)
+    if padded:
+        valid[:, 13:] = False
+        planet[:, 13:] = 0.0
+    want = pwnet.value_batch(np, net, heads, planet, glob, valid)
+    np.testing.assert_allclose(pwnet.value_fast(pwnet.prepare(net, heads), planet, glob, valid), want, rtol=1e-9, atol=1e-9)

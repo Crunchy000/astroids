@@ -343,6 +343,19 @@ Letting it judge only the look-ahead (`PW_JUDGE`, `--judge`: the small network p
 them and the answers to them, about 30 ms a move) scored 0.510 against the same agent without it, within noise. A third
 round for the small network on the same games lost (0.459). About 15 Colab compute units (`results/bigger`).
 
+**A faster entry.** Same moves in about 60% of the time. On 300 positions from real games on maps of 28 or more
+planets (one core, best of three runs): 19 ms a move on average before, 12 after; the slowest tenth from 43 ms to 28, the
+slowest move from 51 to 64 ms down to 37. A third of the positions sent to the network were exact repeats: a fleet that
+lands after the 90-tick horizon leaves the projection the same whatever its target, so those launches all look alike.
+Each position is now scored once. The network runs from weights rearranged once (`pwnet.prepare` and `value_fast`:
+q, k and v as one matrix, each layer norm folded into the matrix after it, all positions as one matrix product a
+layer), the features are written straight into one array, and the projections step only the ticks in which fleets
+land. On 3,801 positions from 60 traced games, 157 moves changed, all from ties: the opponent's answers often score
+exactly the same by its hand score (an attack that fails costs both sides the same ships, so any size of it scores
+alike), and rounding picked among them before and still does. Breaking those ties the same way in both versions
+leaves 10 changed moves, 9 of them between launches that leave identical positions and one a near tie (0.99673 against
+0.99674). The time freed goes to safety on a slower league machine, and would let the bigger network re-rank more.
+
 The earlier value network in "A value function trained on game results (did not help)" below was asked a
 different question, which of the policy's own moves is worth most, and the policy's moves were not where
 the gap was.
