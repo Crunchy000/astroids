@@ -361,10 +361,10 @@ same position, and the opponent's 4 answers average 2.5 different attacks (the r
 the entry as it is, 1,800 games: 895 to 905 (0.497), no gain, so it stays off. (After 900 games it led 0.527: the
 second 900 went 0.468.)
 
-**Are the EgoCentric losses an opening problem? No.** Replayed three times, the entry lost the same 11 of 24 games on
-the 12 maps of earlier losses every time (`results/losses/forced_first.txt`): its play is deterministic. On the 10 it
-always lost, forcing its first launch to the 2nd to 7th best option instead won 34 of 60, but on games it always won
-the same changes lost about half too (3009 side 2: 1 of 6). On these close maps any change to the first move reshuffles
+**Are the EgoCentric losses an opening problem? No.** Replayed three times on the 12 maps of earlier losses, the entry lost
+the same 10 of 24 games every time and one more in two runs (`results/losses/forced_first.txt`): its play is close to
+deterministic. On the 10 it always lost, forcing its first launch to the 2nd to 7th best option instead won 34 of 60,
+but on the three games it always won the same changes won only 9 of 18 (3009 side 2: 1 of 6). On these close maps any change to the first move reshuffles
 the result, so the losses are close games decided late, not a fixable opening mistake, and a search for better
 openings has nothing measurable to aim at here. (`tools/trace/serve_force.py` serves the entry with a forced first
 launch.)
