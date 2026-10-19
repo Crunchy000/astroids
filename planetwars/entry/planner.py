@@ -28,7 +28,7 @@ SIZES = tuple(x for x in os.environ.get("PW_SIZES", "spare").split("+") if x)  #
 TOP = int(os.environ.get("PW_TOP", "128"))      # most launches the value network re-ranks (best hand score first)
 BUDGET_MS = float(os.environ.get("PW_BUDGET_MS", "90"))  # stop adding launches to re-rank past this many ms into a move
 CHUNK = 8                                       # launches per pass through the network
-LOOK = os.environ.get("PW_LOOK", "8:4")         # 'OURS:REPLIES[f]': look one reply deep (see `plan_ranked`); empty for none
+LOOK = os.environ.get("PW_LOOK", "8:4")         # 'OURS:REPLIES[f][d]': look one reply deep (see `plan_ranked`); empty for none
 LOOK_MS = float(os.environ.get("PW_LOOK_MS", "18"))  # time the look-ahead needs besides scoring its positions
 LOOK_SOURCES = 12                               # the opponent's planets with the most free ships that answers come from
 MIX = float(os.environ.get("PW_MIX", "0.5"))    # weight of the hand score against the value network's
@@ -251,7 +251,7 @@ def candidates(s, me, horizon=HORIZON, fractions=FRACTIONS, extra=None, extras=(
     return out
 
 
-def replies(s, me, c, opts, fractions=FRACTIONS, extras=(), top=4, sources=12, focus=False):
+def replies(s, me, c, opts, fractions=FRACTIONS, extras=(), top=4, sources=12, focus=False, distinct=False):
     """The opponent's best answers to each of our options, as pwjax.lvalue.make_reply_agent finds them.
 
     `c` is `candidates(s, me, ..., keep=True)` and `opts` our options as indices into it (-1 for waiting). For each
@@ -259,7 +259,9 @@ def replies(s, me, c, opts, fractions=FRACTIONS, extras=(), top=4, sources=12, f
     free ships, of sizes `fractions` and `extras` ('f' and 'spare' kinds), each projected `c["horizon"]` ticks with
     nobody else acting, ranked by the opponent's hand score. Returns the projected owners and ships after its `top` best
     answers, [len(opts), top, n], which of those exist ([len(opts), top] bool) and the answers ([len(opts), top, 3]:
-    source, target, ships). With `focus` the first two answers to each option are instead the opponent's best launch at
+    source, target, ships). With `distinct` only the best size of each (source, target) counts, so the answers are
+    different attacks rather than one attack in several sizes. With `focus` the first two answers to each option are
+    instead the opponent's best launch at
     that option's target and at its source (by the same hand score), and the rest the best of the others.
     """
     opp, h, n, n_opt = 3 - me, c["horizon"], s.ships.shape[0], len(opts)
@@ -361,6 +363,9 @@ def replies(s, me, c, opts, fractions=FRACTIONS, extras=(), top=4, sources=12, f
     count = np.bincount(o_c, minlength=n_opt)
     for o in range(n_opt):
         mine_o = order[first[o]:first[o] + int(count[o])]                        # this option's answers, best first
+        if distinct:
+            _, best_size = np.unique(i_c[mine_o] * n + t_c[mine_o], return_index=True)
+            mine_o = mine_o[np.sort(best_size)]
         if focus:
             k_opt = opts[o]
             slots = []
@@ -462,8 +467,9 @@ def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=
     options so far are each worth the worst of their own score and the scores after the opponent's REPLIES best answers
     by its hand score (see `replies`). Re-ranking then stops early enough to leave time for that: `look_ms` plus, for
     scoring the OURS * REPLIES positions, the slowest batch of eight so far for every eight of them. If less time is
-    left than that, fewer options look ahead (none if fewer than two would). With `mix_open`, that is the hand score's
-    weight before tick OPEN_TICKS.
+    left than that, fewer options look ahead (none if fewer than two would). A 'd' after REPLIES makes the options
+    different positions and the answers different attacks (see `replies`); an 'f' aims answers at the planets a launch
+    changes. With `mix_open`, that is the hand score's weight before tick OPEN_TICKS.
 
     With `judge` (params, heads, its time per position over the network's), a second, bigger network scores the
     look-ahead: the chosen options themselves and the positions after the answers, as pwjax.lvalue.make_reply_agent
@@ -471,8 +477,9 @@ def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=
     started = time.perf_counter()
     if mix_open is not None and s.tick < OPEN_TICKS:
         mix = mix_open
-    ours, n_rep = (int(x.rstrip("f")) for x in look.split(":")) if look else (0, 0)
-    focus = look.endswith("f")
+    ours, n_rep = (int(x.rstrip("fd")) for x in look.split(":")) if look else (0, 0)
+    tail = look.split(":")[-1].lstrip("0123456789") if look else ""
+    focus, distinct = "f" in tail, "d" in tail
     ratio, per_opt = (judge[2], n_rep + 1) if judge is not None else (1.0, n_rep)  # look-ahead cost per option, in positions
     c = candidates(s, me, horizon, fractions, None, extras, keep=ours > 0)
     if c is None:
@@ -508,9 +515,13 @@ def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=
         left = budget_ms - (time.perf_counter() - started) * 1000 - look_ms
         ours = min(ours, int(left / (took * ratio / CHUNK)) // per_opt)
     if ours >= 2:
-        pick = np.argsort(-seen_t, kind="stable")[:ours]
+        pick = np.argsort(-seen_t, kind="stable")
+        if distinct:  # one option per position left after the launch
+            own = np.concatenate([rep[seen[:cut]] == seen[:cut], [True], rep[seen[cut:]] == seen[cut:]])
+            pick = pick[own[pick]]
+        pick = pick[:ours]
         opts = seen_k[pick]
-        r_own, r_sh, found, _ = replies(s, me, c, opts, fractions, extras, n_rep, LOOK_SOURCES, focus)
+        r_own, r_sh, found, _ = replies(s, me, c, opts, fractions, extras, n_rep, LOOK_SOURCES, focus, distinct)
         if judge is None:
             worst = seen_t[pick].copy()
         else:  # the judge's own view of each option
