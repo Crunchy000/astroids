@@ -1,0 +1,4 @@
+loss: 10 games; first 60 ticks, per game: we took 0.60 neutrals (growth 0.081), EgoCentric 1.00 (growth 0.151), left neutral growth 0.300
+win: 170 games; first 60 ticks, per game: we took 0.97 neutrals (growth 0.135), EgoCentric 0.71 (growth 0.103), left neutral growth 0.373
+loss: 10 games; first 150 ticks, per game: we took 0.60 neutrals (growth 0.081), EgoCentric 1.00 (growth 0.151), left neutral growth 0.300
+win: 170 games; first 150 ticks, per game: we took 1.27 neutrals (growth 0.169), EgoCentric 0.90 (growth 0.131), left neutral growth 0.310

@@ -1,0 +1,14 @@
+GAME seed=1002 a_side=1 ticks=2001 a_ships=1972 b_ships=265 a_points=1.0
+GAME seed=1002 a_side=2 ticks=1083 a_ships=711 b_ships=0 a_points=1.0
+GAME seed=1008 a_side=1 ticks=557 a_ships=0 b_ships=105 a_points=0.0
+GAME seed=1008 a_side=2 ticks=2001 a_ships=75 b_ships=31 a_points=1.0
+GAME seed=2003 a_side=1 ticks=2001 a_ships=1984 b_ships=418 a_points=1.0
+GAME seed=2003 a_side=2 ticks=654 a_ships=0 b_ships=192 a_points=0.0
+GAME seed=3007 a_side=1 ticks=1551 a_ships=211 b_ships=0 a_points=1.0
+GAME seed=3007 a_side=2 ticks=408 a_ships=173 b_ships=0 a_points=1.0
+GAME seed=3010 a_side=1 ticks=587 a_ships=197 b_ships=0 a_points=1.0
+GAME seed=3010 a_side=2 ticks=502 a_ships=85 b_ships=0 a_points=1.0
+GAME seed=3020 a_side=1 ticks=1339 a_ships=256 b_ships=0 a_points=1.0
+GAME seed=3020 a_side=2 ticks=2001 a_ships=192 b_ships=67 a_points=1.0
+GAME seed=3022 a_side=1 ticks=2001 a_ships=2913 b_ships=311 a_points=1.0
+GAME seed=3022 a_side=2 ticks=968 a_ships=1026 b_ships=0 a_points=1.0

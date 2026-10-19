@@ -138,7 +138,9 @@ def make_planner(sources=12, horizon=90, top=8, fractions=FRACTIONS, extras=()):
     extras = tuple(parse_size(e) for e in extras if e not in ("pair", "duo"))
     nf = len(fractions) + len(extras)
 
-    def plan(s: env.State, me, h_eff):
+    def plan(s: env.State, me, h_eff, focus=None):
+        """`focus` ([F] planet ids, -1 for none): the first F candidates are the best launch at each of these planets
+        (for the look-ahead: the opponent's best answer at the planets our launch changes), the rest the best of the others."""
         n = s.ships.shape[0]
         dt = s.ships.dtype
         fr = jnp.asarray(fractions, dt)
@@ -248,11 +250,23 @@ def make_planner(sources=12, horizon=90, top=8, fractions=FRACTIONS, extras=()):
             flat_j = jnp.concatenate([flat_j, jnp.broadcast_to(idx[None, None, :], ok2.shape).reshape(-1)])
             flat_n = jnp.concatenate([flat_n, jnp.broadcast_to(give[:, None, None], ok2.shape).reshape(-1)])
             fo, fs = jnp.concatenate([fo, d_owner.reshape(-1, n)]), jnp.concatenate([fs, d_ships.reshape(-1, n)])
-        vals, pick = jax.lax.top_k(flat, top)
-        best = vals[0]
+        if focus is None:
+            vals, pick = jax.lax.top_k(flat, top)
+            best = vals[0]
+        else:
+            masked = jnp.where(flat_j[None, :] == focus[:, None], flat[None, :], -jnp.inf)   # [F, C]
+            p_f, v_f = jnp.argmax(masked, 1), jnp.max(masked, 1)
+            rest = flat.at[p_f].set(jnp.where(jnp.isfinite(v_f), -jnp.inf, flat[p_f]))
+            r_vals, r_pick = jax.lax.top_k(rest, top - focus.shape[0])
+            vals, pick = jnp.concatenate([v_f, r_vals]), jnp.concatenate([p_f, r_pick]).astype(r_pick.dtype)
+            best_v, best_p = jax.lax.top_k(flat, 1)
+            best = best_v[0]
+            pick0 = best_p[0]
+        if focus is None:
+            pick0 = pick[0]
         go = best > base + 2e-3   # a launch that changes nothing is no reason to launch (float32 noise is ~1e-3)
-        action = (jnp.where(go, flat_i[pick[0]], -1).astype(jnp.int32), jnp.where(go, flat_j[pick[0]], -1).astype(jnp.int32),
-                  jnp.where(go, flat_n[pick[0]], 0.0).astype(dt))
+        action = (jnp.where(go, flat_i[pick0], -1).astype(jnp.int32), jnp.where(go, flat_j[pick0], -1).astype(jnp.int32),
+                  jnp.where(go, flat_n[pick0], 0.0).astype(dt))
         return dict(action=action, best=best, base=base, cand_src=flat_i[pick], cand_dst=flat_j[pick], cand_ships=flat_n[pick],
                     cand_score=vals, cand_owner=fo[pick], cand_ships_final=fs[pick], base_owner=bo, base_ships=bs)
 
