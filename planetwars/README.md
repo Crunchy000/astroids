@@ -355,6 +355,11 @@ exactly the same by its hand score (an attack that fails costs both sides the sa
 alike), and rounding picked among them before and still does. Breaking those ties the same way in both versions
 leaves 10 changed moves, 9 of them between launches that leave identical positions and one a near tie (0.99673 against
 0.99674). The time freed goes to safety on a slower league machine, and would let the bigger network re-rank more.
+The same check found the look-ahead spending its slots on repeats: in 38% of moves some of the 8 options leave the
+same position, and the opponent's 4 answers average 2.5 different attacks (the rest are one attack in other sizes).
+`PW_LOOK=8:4d` makes the options different positions and the answers different attacks. In the real engine against
+the entry as it is, 1,800 games: 895 to 905 (0.497), no gain, so it stays off. (After 900 games it led 0.527: the
+second 900 went 0.468.)
 
 The earlier value network in "A value function trained on game results (did not help)" below was asked a
 different question, which of the policy's own moves is worth most, and the policy's moves were not where

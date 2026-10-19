@@ -1,0 +1,9 @@
+RESULT a=remote8601 b=remote8602 a_wins=45.0 b_wins=55.0 games=100 a_timeouts=0 b_timeouts=0 a_ms=6.14 b_ms=5.98
+RESULT a=remote8603 b=remote8604 a_wins=61.0 b_wins=39.0 games=100 a_timeouts=1 b_timeouts=0 a_ms=6.70 b_ms=5.81
+RESULT a=remote8605 b=remote8606 a_wins=51.0 b_wins=49.0 games=100 a_timeouts=1 b_timeouts=0 a_ms=6.28 b_ms=6.74
+RESULT a=remote8611 b=remote8612 a_wins=108.0 b_wins=92.0 games=200 a_timeouts=0 b_timeouts=0 a_ms=6.51 b_ms=6.43
+RESULT a=remote8613 b=remote8614 a_wins=102.0 b_wins=98.0 games=200 a_timeouts=0 b_timeouts=1 a_ms=6.38 b_ms=6.18
+RESULT a=remote8615 b=remote8616 a_wins=107.0 b_wins=93.0 games=200 a_timeouts=1 b_timeouts=1 a_ms=6.37 b_ms=6.24
+RESULT a=remote8621 b=remote8622 a_wins=150.0 b_wins=150.0 games=300 a_timeouts=0 b_timeouts=5 a_ms=6.76 b_ms=7.19
+RESULT a=remote8623 b=remote8624 a_wins=126.0 b_wins=174.0 games=300 a_timeouts=0 b_timeouts=3 a_ms=6.34 b_ms=6.85
+RESULT a=remote8625 b=remote8626 a_wins=145.0 b_wins=155.0 games=300 a_timeouts=0 b_timeouts=0 a_ms=6.28 b_ms=6.50
