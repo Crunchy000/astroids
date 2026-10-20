@@ -1,6 +1,6 @@
 """A planner that tries every launch: project each one forward with nobody else acting, keep the best.
 (With a value network on disk, the best few by this score are re-ranked by it, looking one opponent reply ahead; see
-`plan_ranked`.)
+`plan_ranked`. In the first 200 ticks it also tries two of its planets taking a neutral together; see `pair_launches`.)
 
 Each tick every (source, target, amount) the rules allow is scored by where the game stands `HORIZON` ticks
 later if nothing else is launched by either side. With no new launches, every planet's future depends only on
@@ -37,7 +37,7 @@ OPEN_TICKS = 150
 VALUE = os.environ.get("PW_VALUE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "value.npz"))
 JUDGE = os.environ.get("PW_JUDGE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "judge.npz"))  # see plan_ranked
 USE_POLICY = os.environ.get("PW_POLICY_CANDIDATE", "0") == "1"  # also try the neural policy's own move
-PAIRS = int(os.environ.get("PW_PAIRS", "0"))     # before this tick, also try two planets taking a neutral together (see `pair_launches`)
+PAIRS = int(os.environ.get("PW_PAIRS", "200"))   # before this tick, also try two planets taking a neutral together (see `pair_launches`); 0: never
 PAIR_MOST = 16                                  # most such pairs scored by the network
 PAIR_WAIT = 30                                  # most ticks the second planet of a pair holds its ships for its launch
 

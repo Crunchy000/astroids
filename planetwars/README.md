@@ -369,6 +369,21 @@ the result, so the losses are close games decided late, not a fixable opening mi
 openings has nothing measurable to aim at here. (`tools/trace/serve_force.py` serves the entry with a forced first
 launch.)
 
+**Two planets taking a neutral together (in the entry).** Each side starts with 4 to 12 planets, with 2 to 10
+neutrals of about 11 ships between them, and 19% of the neutrals nearer us at the start hold more ships than any one of
+our nearby planets has. The planner scores one launch at a time, so it took
+those piecemeal, and a first fleet that softens a neutral can hand it to the opponent (by tick 60 we lost 50 fleets on
+neutrals EgoCentric then took, it lost 30). `pair_launches` in `entry/planner.py` tries, for each neutral no single
+launch takes, two of our planets: the farther launches now with all it can spare, the nearer what the capture still
+needs plus one, launched later by the difference in travel time so both land in the same tick (at most 30 ticks later;
+the agent keeps that planet out of other launches until then). Pairs that take the neutral in the projection are
+scored by the network like launches, and the best is played if it beats every single launch. In the first 200 ticks
+that happens in about 1 opening move in 70; `tests/test_planner.py` checks the projected pair against the engine.
+In the real engine against the entry without it, 1,800 games: 958 to 842 (0.532, about 2.7 standard errors; the
+three series of 600 went 0.527, 0.552 and 0.518). Against EgoCentric on the 180 seeded maps it scored 167, the entry
+without it 168 (the close maps reshuffle, as above). It is on by default (`PW_PAIRS=200`, the tick it stops; 0 turns
+it off). Results in `results/losses/pairs.txt`.
+
 The earlier value network in "A value function trained on game results (did not help)" below was asked a
 different question, which of the policy's own moves is worth most, and the policy's moves were not where
 the gap was.

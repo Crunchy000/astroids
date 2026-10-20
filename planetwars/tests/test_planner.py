@@ -369,3 +369,38 @@ def test_fast_value_matches_value_batch(padded):
         planet[:, 13:] = 0.0
     want = pwnet.value_batch(np, net, heads, planet, glob, valid)
     np.testing.assert_allclose(pwnet.value_fast(pwnet.prepare(net, heads), planet, glob, valid), want, rtol=1e-9, atol=1e-9)
+
+
+def test_pair_launches_match_the_engine():
+    """Two planets taking a neutral together (`pair_launches`): the engine, stepping the first launch now and the second
+    `wait` ticks later with nobody else acting, ends with every planet as projected."""
+    checked = 0
+    for seed in range(40):
+        random.seed(seed)
+        params = GameParams(num_planets=24, max_ticks=600, min_growth_rate=0.05, max_growth_rate=0.2,
+                            transporter_speed=3.5, initial_neutral_ratio=0.3)
+        gs = GameStateFactory(params).create_game()
+        s = entry_agent.arrays(gs, params.transporter_speed, params.max_ticks)
+        for me in (1, 2):
+            c = planner.candidates(s, me, 90, planner.FRACTIONS, None, ("spare",), keep=True)
+            pr = c and planner.pair_launches(s, me, c)
+            if not pr:
+                continue
+            first, second, wait, owner, ships, _ = pr
+            player = Player.Player1 if me == 1 else Player.Player2
+            for k in range(min(len(first), 3)):
+                sim = ForwardModel(copy.deepcopy(gs), params)
+                for t in range(c["horizon"]):
+                    move = first[k] if t == 0 else second[k] if t == wait[k] else None
+                    act = (Action(player_id=player, source_planet_id=int(move[0]), destination_planet_id=int(move[1]),
+                                  num_ships=float(move[2])) if move is not None else Action.do_nothing())
+                    sim.step({player: act, player.opponent(): Action.do_nothing()})
+                got_owner = np.array([entry_agent.OWNER[p.owner] for p in sim.state.planets])
+                got_ships = np.array([p.n_ships for p in sim.state.planets])
+                np.testing.assert_array_equal(owner[k], got_owner)
+                np.testing.assert_allclose(ships[k], got_ships, rtol=1e-6, atol=1e-6)
+                assert got_owner[int(first[k, 1])] == me
+                checked += 1
+        if checked >= 12:
+            break
+    assert checked >= 12
