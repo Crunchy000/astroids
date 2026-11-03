@@ -1,6 +1,6 @@
 # Asteroids 5v5
 
-Two fleets of five triangle ships fight it out in an Asteroids-style arena.
+Two fleets of five triangle ships fight it out in an Asteroids-style arena. 
 
 - **Watch it in the browser:** https://crunchy000.github.io/astorids/ (`index.html`, scripted AI on both sides). It has synthesised sound effects (lasers, hits, explosions, asteroid thuds, panned by position): press any key to start audio, and M to mute.
 - **Train agents in Python:** `astroids_gym`, a [Gymnasium](https://gymnasium.farama.org/) (the maintained successor to OpenAI Gym) and [PettingZoo](https://pettingzoo.farama.org/) port of the same game.
