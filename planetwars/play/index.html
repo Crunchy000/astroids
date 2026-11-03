@@ -1,0 +1,601 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Planet Wars vs Our Agent</title>
+<meta name="description" content="Play Planet Wars in your browser against our league entry: the all-moves planner with its value network, running locally.">
+<style>
+  :root {
+    --bg: #05060a; --panel: #0d0f16; --line: #1d212c; --text: #e6e7ea; --text-2: #9aa0ac; --text-3: #667;
+    --blue: #4cc9f0; --red: #ff7b54; --neutral: #7d8392;
+    --mono: ui-monospace, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); }
+  body { display: flex; flex-direction: column; height: 100dvh; font: 14px/1.4 var(--mono); overflow: hidden; }
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; padding: 10px 16px 6px; }
+  h1 { font: 700 16px/1.2 var(--mono); margin: 0; letter-spacing: 0.02em; white-space: nowrap; }
+  h1 .b { color: var(--blue); } h1 .r { color: var(--red); }
+  .controls { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-left: auto; }
+  label { color: var(--text-2); font-size: 12px; display: flex; align-items: center; gap: 6px; }
+  select, button {
+    font: 13px var(--mono); color: var(--text); background: var(--panel); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 8px; cursor: pointer;
+  }
+  button:hover, select:hover { border-color: #2c3242; }
+  button.primary { background: #10303b; border-color: #1d5566; color: #bfefff; }
+  nav { display: flex; gap: 14px; font-size: 12px; }
+  #hud { display: grid; grid-template-columns: 1fr auto 1fr; align-items: end; gap: 8px; padding: 2px 16px 4px; }
+  #hud .side { font-size: 13px; }
+  #hud .side b { font-size: 15px; }
+  #hud .you { color: var(--blue); }
+  #hud .ai { color: var(--red); text-align: right; }
+  #hud .mid { color: var(--text-2); text-align: center; font-size: 12px; }
+  #share { height: 4px; margin: 0 16px; display: flex; border-radius: 2px; overflow: hidden; background: var(--line); }
+  #share div { transition: width 0.2s; }
+  #stage { position: relative; flex: 1; min-height: 0; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; display: block; }
+  .overlay {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px;
+    background: rgba(5, 6, 10, 0.72);
+  }
+  .overlay[hidden] { display: none; }
+  .card {
+    max-width: 560px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 18px 20px; font: 14px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--text-2);
+    max-height: 100%; overflow: auto;
+  }
+  .card h2 { font: 700 18px/1.3 var(--mono); color: var(--text); margin: 0 0 8px; }
+  .card p { margin: 0 0 10px; }
+  .card b { color: var(--text); }
+  .card .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+  .card kbd { font: 12px var(--mono); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; color: var(--text); }
+  #paused { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); color: var(--text-2);
+            font-size: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 3px 10px; pointer-events: none; }
+  footer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; padding: 6px 16px 10px; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; background: transparent; color: var(--text-2); padding: 5px 10px; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button.on { background: #10303b; color: #bfefff; }
+  #status { color: var(--text-3); font-size: 12px; flex: 1; min-width: 220px; }
+  #agentinfo { color: var(--text-3); font-size: 12px; }
+  @media (max-width: 640px) {
+    header { padding: 8px 12px 4px; }
+    h1 { font-size: 14px; }
+    nav, .controls label .t, .grow, #status { display: none; }
+    .controls { margin-left: 0; gap: 6px; }
+    select, button { padding: 4px 6px; font-size: 12px; }
+    #hud { padding: 2px 12px 4px; }
+    #share { margin: 0 12px; }
+    footer { padding: 6px 12px 10px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="b">YOU</span> vs <span class="r">OUR AGENT</span>: Planet Wars</h1>
+  <div class="controls">
+    <label><span class="t">Opponent</span>
+      <select id="opp">
+        <option value="entry">Hard: our league entry</option>
+        <option value="planner">Medium: planner, hand score only</option>
+        <option value="greedy">Easy: their greedy sample agent</option>
+      </select>
+    </label>
+    <label><span class="t">Map</span>
+      <select id="map">
+        <option value="0">League map (10 to 30 planets)</option>
+        <option value="10">Small map (10)</option>
+        <option value="20">Medium map (20)</option>
+        <option value="30">Large map (30)</option>
+      </select>
+    </label>
+    <label><span class="t">Speed</span>
+      <select id="speed">
+        <option value="160">Slow (6 ticks/s)</option>
+        <option value="100" selected>Normal (10 ticks/s)</option>
+        <option value="50">Fast (20 ticks/s)</option>
+      </select>
+    </label>
+    <button id="pause" title="Space">Pause</button>
+    <button id="restart" title="Same map, from the start">Restart</button>
+    <button id="newmap" class="primary" title="N">New map</button>
+  </div>
+  <nav><a href="../../videos.html">Trained agents</a><a href="https://github.com/Crunchy000/astroids/tree/ccr-ccbf1ca0-erm5dw/planetwars">Source</a></nav>
+</header>
+<div id="hud">
+  <div class="side you"><b id="h-ships">0</b> ships · <span id="h-planets">0</span> planets<span class="grow"> · +<span id="h-growth">0</span>/tick</span></div>
+  <div class="mid">tick <span id="tick">0</span> / <span id="maxt">2000</span></div>
+  <div class="side ai"><b id="a-ships">0</b> ships · <span id="a-planets">0</span> planets<span class="grow"> · +<span id="a-growth">0</span>/tick</span></div>
+</div>
+<div id="share"><div id="share-h" style="background: var(--blue); width: 50%"></div><div style="flex: 1"></div><div id="share-a" style="background: var(--red); width: 50%"></div></div>
+<div id="stage">
+  <canvas id="c"></canvas>
+  <div id="paused" hidden>Paused: you can still give orders</div>
+  <div class="overlay" id="intro">
+    <div class="card">
+      <h2>Planet Wars against our agent</h2>
+      <p>You are <b style="color: var(--blue)">blue</b>, on the left. Send ships from your planets to take others: a fleet
+        that lands with more ships than the planet holds takes it. Planets you own grow ships every tick, bigger ones
+        faster. Each planet can have only one fleet in flight at a time.</p>
+      <p>Win by taking every enemy planet, or by having more ships on planets after 2,000 ticks.</p>
+      <p><b>Controls.</b> Click one of your planets, then click where to send (any planet, your own included). Drag from
+        a planet works too. <kbd>Shift</kbd>-click or <kbd>A</kbd> picks several. <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd>
+        <kbd>4</kbd> send a quarter, half, three quarters or all. <kbd>Space</kbd> pauses, and you can still give orders
+        while paused. <kbd>M</kbd> turns the sound on or off. Each side launches at most one fleet a tick, so extra orders wait their turn.</p>
+      <p id="oppdesc"></p>
+      <div class="row"><button class="primary" id="start" disabled>Loading the agent…</button></div>
+    </div>
+  </div>
+  <div class="overlay" id="end" hidden>
+    <div class="card">
+      <h2 id="end-title"></h2>
+      <p id="end-text"></p>
+      <div class="row"><button class="primary" id="again">Rematch on this map</button><button id="another">New map</button></div>
+    </div>
+  </div>
+</div>
+<footer>
+  <span class="seg" id="frac">
+    <button data-f="0.25">25%</button><button data-f="0.5" class="on">50%</button><button data-f="0.75">75%</button><button data-f="1">All</button>
+  </span>
+  <button id="selall" title="A">Select all</button>
+  <button id="sound" title="M">Sound on</button>
+  <span id="status"></span>
+  <span id="agentinfo"></span>
+</footer>
+
+<script src="pw.js"></script>
+<script>
+(() => {
+  'use strict';
+  const HUMAN = 1, AI = 2;
+  const COLOR = { 0: '#7d8392', 1: '#4cc9f0', 2: '#ff7b54' };
+  const FILL = { 0: 'rgba(125,131,146,0.16)', 1: 'rgba(76,201,240,0.20)', 2: 'rgba(255,123,84,0.20)' };
+  const OPP_TEXT = {
+    entry: 'Hard: our league entry, as submitted. Every tick it projects every launch 90 ticks ahead, has its value network re-rank the best (up to 128), looks one reply ahead for the best eight, and in the opening tries two planets taking a neutral together. It runs in your browser, in WebAssembly.',
+    planner: 'Medium: the same planner without the network: every launch projected 90 ticks ahead and ranked by a hand-written score.',
+    greedy: 'Easy: the greedy sample agent that ships with the league: half the ships of its biggest planet at the weakest nearby target, when it thinks the attack will win.',
+  };
+  const $ = id => document.getElementById(id);
+  const canvas = $('c'), ctx = canvas.getContext('2d');
+
+  // ---- settings, from the address so a map can be shared
+  const q = new URLSearchParams(location.search);
+  const pick = (sel, v) => { if (v !== null && [...sel.options].some(o => o.value === v)) sel.value = v; };
+  pick($('opp'), q.get('opp')); pick($('map'), q.get('planets')); pick($('speed'), q.get('speed'));
+  let seed = parseInt(q.get('seed'), 10);
+  if (!Number.isFinite(seed)) seed = Math.floor(Math.random() * 1e9);
+
+  // ---- state
+  let st = null, game = 0, started = false, paused = false, over = false;
+  let agentAction, agentReady = false, lastStep = 0, waitingSince = 0;
+  let queue = [];               // human orders: {src, dst, frac}, one launched per tick
+  const selected = new Set();
+  let frac = 0.5, hover = null, mouse = null, drag = null;
+  let workerReady = false, agentInfo = null, agentMs = 0, wasm = true;
+  const tickMs = () => parseInt($('speed').value, 10);
+  const budgetMs = () => Math.min(90, Math.round(tickMs() * 0.9));
+
+  // ---- the opponent, in a worker
+  const worker = new Worker('worker.js');
+  worker.onmessage = e => {
+    const m = e.data;
+    if (m.type === 'ready') {
+      workerReady = true; wasm = m.wasm;
+      $('start').disabled = false; $('start').textContent = 'Start';
+      if (st) askAgent();
+    } else if (m.type === 'action') {
+      if (m.game !== game || !st || m.tick !== st.tick) return;
+      agentAction = m.action; agentReady = true;
+      if (m.info && m.info.launches) { agentInfo = m.info; agentMs = m.ms; } else if ($('opp').value !== 'entry') agentMs = m.ms;
+      showAgentInfo();
+    } else if (m.type === 'error') {
+      $('start').textContent = 'Could not load the agent'; console.error(m.message);
+    }
+  };
+  function askAgent() {
+    agentReady = false; agentAction = null; waitingSince = performance.now();
+    if (workerReady) worker.postMessage({ type: 'act', game, state: st, me: AI, budgetMs: budgetMs() });
+  }
+
+  function newGame(keepSeed) {
+    if (!keepSeed) seed = Math.floor(Math.random() * 1e9);
+    const planets = parseInt($('map').value, 10) || 0;
+    st = PW.newGame(seed, planets);
+    game++; over = false; queue = []; selected.clear(); drag = null; agentInfo = null; agentMs = 0;
+    worker.postMessage({ type: 'new', kind: $('opp').value });
+    askAgent();
+    lastStep = performance.now();
+    $('maxt').textContent = st.maxTicks;
+    $('end').hidden = true;
+    $('oppdesc').textContent = OPP_TEXT[$('opp').value];
+    const url = new URL(location.href);
+    url.searchParams.set('seed', seed); url.searchParams.set('opp', $('opp').value);
+    if (planets) url.searchParams.set('planets', planets); else url.searchParams.delete('planets');
+    url.searchParams.set('speed', $('speed').value);
+    history.replaceState(null, '', url);
+    initStars();
+    updateHud(); showAgentInfo();
+  }
+
+  // ---- human orders
+  function order(sources, dst) {
+    for (const src of sources) if (src !== dst) queue.push({ src, dst, frac });
+    selected.clear();
+  }
+  function popHuman() {
+    for (let i = 0; i < queue.length; i++) {
+      const o = queue[i], p = st.planets[o.src];
+      if (p.owner !== HUMAN) { queue.splice(i--, 1); continue; }   // lost the planet: drop the order
+      if (p.tr || p.ships < 1) continue;                            // fleet still in flight: wait for it to land
+      queue.splice(i, 1);
+      return { src: o.src, dst: o.dst, ships: o.frac >= 1 ? p.ships : Math.max(1, Math.floor(p.ships * o.frac)) };
+    }
+    return null;
+  }
+
+  function stepGame(now) {
+    const before = st.planets.map(p => ({ owner: p.owner, tr: p.tr && { owner: p.tr.owner, dst: p.tr.dst, ships: p.tr.ships } }));
+    PW.step(st, { 1: popHuman(), 2: agentAction });
+    lastStep = now;
+    gameEvents(before, now);
+    for (const s of [...selected]) if (st.planets[s].owner !== HUMAN) selected.delete(s);
+    if (PW.isTerminal(st)) { endGame(); return; }
+    askAgent();
+  }
+
+  function endGame() {
+    over = true;
+    const h = st.planets.some(p => p.owner === HUMAN), a = st.planets.some(p => p.owner === AI);
+    const winner = !h && !a ? 0 : !h ? AI : !a ? HUMAN : PW.leader(st);
+    const hs = Math.floor(PW.shipsOf(st, HUMAN)), as = Math.floor(PW.shipsOf(st, AI));
+    $('end-title').textContent = winner === HUMAN ? 'You win!' : winner === AI ? 'Our agent wins' : 'A draw';
+    $('end-title').style.color = winner === HUMAN ? 'var(--blue)' : winner === AI ? 'var(--red)' : 'var(--text)';
+    const how = !h || !a ? (!h ? 'with all your planets taken' : 'with every enemy planet taken') : `on ships after ${st.maxTicks} ticks`;
+    $('end-text').textContent = `${winner === 0 ? 'Even' : 'Decided'} ${how}, at tick ${st.tick}. Ships on planets: you ${hs}, agent ${as}. ` +
+      `Opponent: ${$('opp').selectedOptions[0].textContent}.`;
+    $('end').hidden = false;
+    updateHud();
+    if (winner === HUMAN) arpeggio([0, 2, 4, 5, 7, 9, 10], 0.1, 0.09, 0.5);
+    else if (winner === AI) arpeggio([7, 5, 3, 2, 0], 0.14, 0.09, 0.6, 'triangle');
+  }
+
+  // ---- sound and effects: the Auralux sound set (pentatonic, synthesized with Web Audio, no samples)
+  const SCALE = [261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33, 659.25, 783.99, 880.00, 1046.50];
+  let audio = null, master = null, soundOn = true;
+  try { soundOn = localStorage.getItem('pw-sound') !== 'off'; } catch (e) { /* storage blocked: sound on */ }
+  function initAudio() {
+    if (audio) { if (audio.state === 'suspended') audio.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    audio = new AC();
+    master = audio.createGain();
+    master.gain.value = 0.8;
+    master.connect(audio.destination);
+  }
+  function tone(freq, type = 'sine', duration = 0.4, volume = 0.1, delay = 0) {
+    if (!soundOn || !audio || audio.state !== 'running') return;
+    const t = audio.currentTime + delay, osc = audio.createOscillator(), gain = audio.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t);
+    gain.gain.setValueAtTime(volume, t);                                  // instant attack, smooth exponential decay
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+    osc.connect(gain); gain.connect(master);
+    osc.start(t); osc.stop(t + duration);
+  }
+  function arpeggio(steps, gap, volume, duration = 0.25, type = 'sine') {
+    steps.forEach((k, i) => tone(SCALE[k], type, duration, volume, i * gap));
+  }
+  const pickOf = (lo, n) => SCALE[lo + Math.floor(Math.random() * n)];
+  function setSound(on) {
+    soundOn = on;
+    try { localStorage.setItem('pw-sound', on ? 'on' : 'off'); } catch (e) { /* not remembered */ }
+    $('sound').textContent = on ? 'Sound on' : 'Sound off';
+    if (on) initAudio();
+  }
+
+  let particles = [], rings = [], flashes = [];
+  const GLOW = { 0: '#b9bdc7', 1: '#4cc9f0', 2: '#ff7b54' };
+  function clash(p, owner) {  // particles closing in on a planet a fleet lands on
+    for (let i = 0; i < 12; i++) {
+      const a = Math.random() * Math.PI * 2, d = p.radius + 28 + Math.random() * 10;
+      particles.push({ x: p.x + Math.cos(a) * d, y: p.y + Math.sin(a) * d, tx: p.x, ty: p.y, c: GLOW[owner], life: 1, decay: 1.8 + Math.random() * 1.2, size: 1.5 + Math.random() * 2, inward: true });
+    }
+  }
+  function burst(p, owner) {  // a planet changes hands: particles fly out and a ring spreads
+    for (let i = 0; i < 20; i++) {
+      const a = Math.random() * Math.PI * 2, v = 30 + Math.random() * 60;
+      particles.push({ x: p.x, y: p.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, c: GLOW[owner], life: 1, decay: 1.2 + Math.random() * 0.8, size: 1.5 + Math.random() * 2.5 });
+    }
+    rings.push({ x: p.x, y: p.y, r: p.radius, grow: 90, c: GLOW[owner], a: 0.7, fade: 0.9 });
+    flashes.push({ id: p.id, life: 1 });
+  }
+  function pulse(p) { rings.push({ x: p.x, y: p.y, r: p.radius, grow: 28, c: GLOW[p.owner], a: 0.28, fade: 0.35 }); }
+
+  function gameEvents(before, now) {
+    let clashes = 0, ours = false, launches = 0;
+    const captured = [];
+    st.planets.forEach((p, i) => {
+      const b = before[i];
+      if (!b.tr && p.tr) launches++;
+      if (b.tr && !p.tr) {                                                  // a fleet landed
+        const d = st.planets[b.tr.dst];
+        if (before[b.tr.dst].owner !== b.tr.owner) { clash(d, b.tr.owner); clashes++; ours = ours || b.tr.owner === HUMAN; }
+      }
+      if (b.owner !== p.owner) captured.push(p);
+    });
+    if (launches) tone(pickOf(3, 3), 'sine', 0.15, 0.03);
+    if (clashes) tone(pickOf(ours ? 6 : 4, 5), 'sine', 0.3, 0.12);         // high crisp chime on impact (lower for the agent's)
+    for (const p of captured.slice(0, 3)) burst(p, p.owner);
+    if (captured.some(p => p.owner === HUMAN)) arpeggio([4, 6, 8, 10], 0.07, 0.08);       // you took a planet: rising
+    else if (captured.some(p => p.owner === AI)) arpeggio([7, 5, 3, 1], 0.07, 0.07);      // the agent did: falling
+    if (st.tick % 25 === 0) {                                              // the idle pulse: a low drone and rings
+      tone(pickOf(0, 3), 'triangle', 0.6, 0.12);
+      for (const p of st.planets) if (p.owner) pulse(p);
+    }
+    if (particles.length > 600) particles.splice(0, particles.length - 600);
+  }
+
+  let fxAt = 0;
+  function drawEffects(now, X, Y, S) {
+    const dt = fxAt ? Math.min(0.05, (now - fxAt) / 1000) : 0;
+    fxAt = now;
+    rings = rings.filter(r => r.a > 0);
+    for (const r of rings) {
+      r.r += r.grow * dt; r.a -= r.fade * dt;
+      ctx.globalAlpha = Math.max(0, r.a); ctx.strokeStyle = r.c; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(X(r.x), Y(r.y), r.r * S, 0, Math.PI * 2); ctx.stroke();
+    }
+    particles = particles.filter(q => q.life > 0);
+    ctx.save();
+    ctx.shadowBlur = 8;
+    for (const q of particles) {
+      if (q.inward) { q.x += (q.tx - q.x) * Math.min(1, 4 * dt); q.y += (q.ty - q.y) * Math.min(1, 4 * dt); }
+      else { q.x += q.vx * dt; q.y += q.vy * dt; }
+      q.life -= q.decay * dt;
+      ctx.globalAlpha = Math.max(0, q.life); ctx.fillStyle = q.c; ctx.shadowColor = q.c;
+      ctx.beginPath(); ctx.arc(X(q.x), Y(q.y), q.size, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+    flashes = flashes.filter(f => f.life > 0);
+    for (const f of flashes) f.life -= 2 * dt;
+  }
+
+  // ---- input
+  function view() {
+    const w = canvas.clientWidth, h = canvas.clientHeight, pad = 10;
+    const s = Math.min((w - 2 * pad) / PW.WIDTH, (h - 2 * pad) / PW.HEIGHT);
+    return { s, ox: (w - PW.WIDTH * s) / 2, oy: (h - PW.HEIGHT * s) / 2 };
+  }
+  function toMap(e) {
+    const r = canvas.getBoundingClientRect(), v = view();
+    return { x: (e.clientX - r.left - v.ox) / v.s, y: (e.clientY - r.top - v.oy) / v.s, sx: e.clientX, sy: e.clientY };
+  }
+  function planetAt(m) {
+    if (!st || !m) return null;
+    const v = view();
+    let best = null, bd = Infinity;
+    for (const p of st.planets) {
+      const d = Math.hypot(p.x - m.x, p.y - m.y), reach = Math.max(p.radius + 4 / v.s, 16 / v.s);
+      if (d < reach && d < bd) { best = p; bd = d; }
+    }
+    return best;
+  }
+  canvas.addEventListener('pointerdown', e => {
+    if (!st || over) return;
+    canvas.setPointerCapture(e.pointerId);
+    const m = toMap(e), p = planetAt(m);
+    drag = { from: p && p.owner === HUMAN ? p : null, x: m.sx, y: m.sy, moved: false };
+  });
+  canvas.addEventListener('pointermove', e => {
+    mouse = toMap(e); hover = planetAt(mouse);
+    if (drag && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 8) drag.moved = true;
+    canvas.style.cursor = hover && (hover.owner === HUMAN || selected.size) ? 'pointer' : 'default';
+  });
+  canvas.addEventListener('pointerleave', () => { if (!drag) { mouse = null; hover = null; } });
+  canvas.addEventListener('pointerup', e => {
+    if (!drag) return;
+    const m = toMap(e), p = planetAt(m), d = drag;
+    drag = null;
+    if (d.moved) {
+      if (d.from && p && p !== d.from) order(selected.has(d.from.id) ? [...selected] : [d.from.id], p.id);
+      return;
+    }
+    if (!p) { selected.clear(); return; }
+    if (selected.has(p.id)) { selected.delete(p.id); return; }
+    if (p.owner === HUMAN && (e.shiftKey || selected.size === 0)) { selected.add(p.id); return; }
+    if (selected.size) order([...selected], p.id);
+  });
+  canvas.addEventListener('contextmenu', e => { e.preventDefault(); selected.clear(); });
+
+  function setFrac(f) {
+    frac = f;
+    for (const b of $('frac').children) b.classList.toggle('on', parseFloat(b.dataset.f) === f);
+  }
+  $('frac').addEventListener('click', e => { if (e.target.dataset.f) setFrac(parseFloat(e.target.dataset.f)); });
+  function selectAll() { if (st) for (const p of st.planets) if (p.owner === HUMAN) selected.add(p.id); }
+  $('selall').onclick = selectAll;
+  function togglePause() {
+    if (!started || over) return;
+    paused = !paused;
+    $('pause').textContent = paused ? 'Resume' : 'Pause';
+    $('paused').hidden = !paused;
+  }
+  $('pause').onclick = togglePause;
+  $('restart').onclick = () => newGame(true);
+  $('newmap').onclick = () => newGame(false);
+  $('again').onclick = () => newGame(true);
+  $('another').onclick = () => newGame(false);
+  $('opp').onchange = () => newGame(true);
+  $('map').onchange = () => newGame(false);
+  $('speed').onchange = () => { const url = new URL(location.href); url.searchParams.set('speed', $('speed').value); history.replaceState(null, '', url); };
+  $('start').onclick = () => { started = true; $('intro').hidden = true; lastStep = performance.now(); initAudio(); };
+  $('sound').onclick = () => setSound(!soundOn);
+  canvas.addEventListener('pointerdown', initAudio);
+  window.addEventListener('keydown', e => {
+    if (e.target.tagName === 'SELECT') return;
+    if (e.key === ' ') { e.preventDefault(); togglePause(); }
+    else if (e.key >= '1' && e.key <= '4') setFrac([0.25, 0.5, 0.75, 1][+e.key - 1]);
+    else if (e.key === 'a' || e.key === 'A') selectAll();
+    else if (e.key === 'n' || e.key === 'N') newGame(false);
+    else if (e.key === 'Escape') { if (selected.size) selected.clear(); else queue = []; }
+    else if (e.key === 'm' || e.key === 'M') setSound(!soundOn);
+    else if (e.key === 'Enter' && !$('intro').hidden && !$('start').disabled) $('start').click();
+  });
+
+  // ---- drawing
+  let stars = [];
+  function initStars() {
+    const r = PW.mulberry32(seed ^ 0x5bd1e995);
+    stars = Array.from({ length: 140 }, () => ({ x: r() * PW.WIDTH, y: r() * PW.HEIGHT, a: 0.15 + r() * 0.35, s: r() < 0.1 ? 1.4 : 0.8 }));
+  }
+  function resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(canvas.clientWidth * dpr); canvas.height = Math.round(canvas.clientHeight * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  new ResizeObserver(resize).observe(canvas);
+
+  function sendCount(p, f) { return f >= 1 ? Math.floor(p.ships) : Math.max(1, Math.floor(p.ships * f)); }
+
+  function draw(now) {
+    const W = canvas.clientWidth, H = canvas.clientHeight;
+    ctx.clearRect(0, 0, W, H);
+    if (!st) return;
+    const v = view(), S = v.s;
+    const X = x => v.ox + x * S, Y = y => v.oy + y * S;
+    ctx.fillStyle = '#e6e7ea';
+    for (const s of stars) { ctx.globalAlpha = s.a; ctx.fillRect(X(s.x), Y(s.y), s.s, s.s); }
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = '#141824'; ctx.lineWidth = 1;
+    ctx.strokeRect(v.ox, v.oy, PW.WIDTH * S, PW.HEIGHT * S);
+    const alpha = paused || over || !started ? 0 : Math.min(1, (now - lastStep) / tickMs());
+
+    // queued orders
+    ctx.setLineDash([4, 5]); ctx.lineWidth = 1.2;
+    queue.forEach((o, k) => {
+      const a = st.planets[o.src], b = st.planets[o.dst];
+      ctx.strokeStyle = 'rgba(76,201,240,0.45)';
+      ctx.beginPath(); ctx.moveTo(X(a.x), Y(a.y)); ctx.lineTo(X(b.x), Y(b.y)); ctx.stroke();
+    });
+    ctx.setLineDash([]);
+
+    // fleets in flight
+    for (const p of st.planets) {
+      const t = p.tr;
+      if (!t) continue;
+      const d = st.planets[t.dst], x = t.x + t.vx * alpha, y = t.y + t.vy * alpha;
+      ctx.strokeStyle = t.owner === HUMAN ? 'rgba(76,201,240,0.16)' : 'rgba(255,123,84,0.16)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(X(x), Y(y)); ctx.lineTo(X(d.x), Y(d.y)); ctx.stroke();
+      const ang = Math.atan2(t.vy, t.vx), size = 5 + 1.6 * Math.log2(1 + t.ships);
+      ctx.save(); ctx.translate(X(x), Y(y)); ctx.rotate(ang);
+      ctx.fillStyle = COLOR[t.owner];
+      ctx.beginPath(); ctx.moveTo(size, 0); ctx.lineTo(-size * 0.7, size * 0.6); ctx.lineTo(-size * 0.7, -size * 0.6); ctx.closePath(); ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = COLOR[t.owner]; ctx.font = '600 11px ui-monospace, Menlo, Consolas, monospace';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillText(String(Math.floor(t.ships)), X(x) + size + 3, Y(y) - size);
+    }
+
+    drawEffects(now, X, Y, S);
+
+    // planets
+    for (const p of st.planets) {
+      const r = p.radius * S, cx = X(p.x), cy = Y(p.y);
+      const fl = flashes.find(f => f.id === p.id);
+      if (fl) { ctx.save(); ctx.shadowBlur = 24 * fl.life; ctx.shadowColor = COLOR[p.owner]; }
+      ctx.fillStyle = FILL[p.owner];
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = COLOR[p.owner]; ctx.lineWidth = p.owner ? 2 : 1.2;
+      ctx.stroke();
+      if (fl) ctx.restore();
+      if (p.tr && p.owner === p.tr.owner) {  // fleet in flight: no launch from here until it lands
+        ctx.strokeStyle = COLOR[p.owner]; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.45;
+        ctx.beginPath(); ctx.arc(cx, cy, r + 3.5, -Math.PI / 2, -Math.PI / 2 + Math.PI / 4); ctx.stroke(); ctx.globalAlpha = 1;
+      }
+      if (selected.has(p.id)) {
+        ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(cx, cy, r + 5, 0, Math.PI * 2); ctx.stroke();
+      } else if (hover === p && (p.owner === HUMAN || selected.size)) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(cx, cy, r + 5, 0, Math.PI * 2); ctx.stroke();
+      }
+      ctx.fillStyle = p.owner ? '#f2f4f7' : '#b9bdc7';
+      ctx.font = `700 ${Math.max(11, Math.min(18, r * 0.75))}px ui-monospace, Menlo, Consolas, monospace`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(String(Math.floor(p.ships)), cx, cy + 0.5);
+    }
+
+    // aiming: from the selection (or the planet being dragged) to the cursor
+    const from = drag && drag.moved && drag.from ? (selected.has(drag.from.id) ? [...selected].map(i => st.planets[i]) : [drag.from])
+      : selected.size && mouse ? [...selected].map(i => st.planets[i]) : [];
+    if (from.length && mouse) {
+      const tgt = hover && !(from.length === 1 && hover === from[0]) ? hover : null;
+      const tx = tgt ? X(tgt.x) : mouse.sx - canvas.getBoundingClientRect().left;
+      const ty = tgt ? Y(tgt.y) : mouse.sy - canvas.getBoundingClientRect().top;
+      ctx.strokeStyle = tgt ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.3)'; ctx.lineWidth = 1.5;
+      for (const p of from) { ctx.beginPath(); ctx.moveTo(X(p.x), Y(p.y)); ctx.lineTo(tx, ty); ctx.stroke(); }
+      if (tgt) {
+        const n = from.filter(p => p !== tgt).reduce((a, p) => a + sendCount(p, frac), 0);
+        ctx.fillStyle = '#fff'; ctx.font = '600 12px ui-monospace, Menlo, Consolas, monospace';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+        ctx.fillText(`send ${n}`, tx, ty - tgt.radius * S - 8);
+      }
+    }
+  }
+
+  // ---- hud
+  function updateHud() {
+    if (!st) return;
+    const sum = (o, f) => st.planets.reduce((a, p) => a + (p.owner === o ? f(p) : 0), 0);
+    const hs = sum(HUMAN, p => p.ships), as = sum(AI, p => p.ships);
+    const fl = o => st.planets.reduce((a, p) => a + (p.tr && p.tr.owner === o ? p.tr.ships : 0), 0);
+    $('h-ships').textContent = Math.floor(hs + fl(HUMAN)); $('a-ships').textContent = Math.floor(as + fl(AI));
+    $('h-planets').textContent = sum(HUMAN, () => 1); $('a-planets').textContent = sum(AI, () => 1);
+    $('h-growth').textContent = sum(HUMAN, p => p.growth).toFixed(2); $('a-growth').textContent = sum(AI, p => p.growth).toFixed(2);
+    $('tick').textContent = st.tick;
+    const tot = hs + fl(HUMAN) + as + fl(AI) || 1;
+    $('share-h').style.width = (100 * (hs + fl(HUMAN)) / tot).toFixed(1) + '%';
+    $('share-a').style.width = (100 * (as + fl(AI)) / tot).toFixed(1) + '%';
+    let status = '';
+    if (queue.length) status = `${queue.length} order${queue.length > 1 ? 's' : ''} waiting (one launch a tick; Esc cancels)`;
+    else if (selected.size) status = `${selected.size} selected: click a planet to send ${frac >= 1 ? 'all' : Math.round(frac * 100) + '%'}`;
+    else status = 'Click your planet, then a target. Shift-click or A for several. 1 to 4 set the fleet size.';
+    $('status').textContent = status;
+  }
+  function showAgentInfo() {
+    const kind = $('opp').value;
+    let t = '';
+    if (!workerReady) t = 'Loading the agent…';
+    else if (kind === 'entry' && agentInfo && agentInfo.launches) {
+      t = `Agent: ${Math.round(agentMs)} ms, re-ranked ${agentInfo.ranked} of ${agentInfo.launches} launches` +
+        (agentInfo.looked ? `, looked ahead on ${agentInfo.looked}` : '') + (agentInfo.pair ? ', two-planet capture' : '');
+    } else if (kind !== 'entry' && agentMs) t = `Agent: ${agentMs < 1 ? 'under 1' : Math.round(agentMs)} ms a move`;
+    if (workerReady && !wasm && kind === 'entry') t += ' (no WebAssembly SIMD here: slower, fewer launches)';
+    $('agentinfo').textContent = t;
+  }
+
+  let hudAt = 0;
+  function frame(now) {
+    if (st && started && !paused && !over && agentReady && now - lastStep >= tickMs()) stepGame(now);
+    if (st && started && !paused && !over && !agentReady && workerReady && now - waitingSince > tickMs() * 1.5) $('agentinfo').textContent = 'Agent thinking…';
+    draw(now);
+    if (now - hudAt > 100) { updateHud(); hudAt = now; }
+    requestAnimationFrame(frame);
+  }
+
+  $('sound').textContent = soundOn ? 'Sound on' : 'Sound off';
+  window.pwGame = { state: () => st, view, queue: () => queue };  // for tests
+  resize();
+  newGame(true);
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

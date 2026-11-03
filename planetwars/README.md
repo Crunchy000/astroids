@@ -35,7 +35,42 @@ planetwars/
   tests/           parity tests against the official engine
   tools/           record_game.py (render a game as an MP4), remote_match.py, TraceGame.kt + render_trace.py + aura.py (our entry vs TeamTitansAgentV3 as an MP4, Auralux-style with sound)
   media/           recorded games: against their greedy agent, and two against TeamTitansAgentV3
+  play/            the game in the browser against the entry (https://crunchy000.github.io/astroids/planetwars/play/)
 ```
+
+## Play against it in the browser
+
+https://crunchy000.github.io/astroids/planetwars/play/ is Planet Wars against the entry, in the browser with no
+server. You are blue, the opponent is red: click (or drag from) your planet, then a target; shift-click or `A` picks
+several, `1` to `4` set the fleet size, Space pauses (orders can still be given), `M` mutes. League-style maps (or a fixed
+size), three speeds, and three opponents: the entry as submitted (Hard), the planner with its hand score only (Medium)
+and their greedy sample agent (Easy). The address keeps the map's seed, so a map can be shared. Launches, clashes and
+captures play the Auralux-style pentatonic sound set (Web Audio, synthesized, no samples).
+
+```
+play/
+  index.html     the page: drawing, input, sound, the game loop (one launch a tick for each side, as in the league)
+  pw.js          the rules (core/forward_model.py), league maps, their greedy agent, and entry/planner.py ported:
+                 `candidates`, `replies`, `pair_launches`, `plan_ranked` and the value network, same names
+  worker.js      runs the opponent off the page's thread
+  wasm/net.c     the value network's forward pass in WebAssembly SIMD (build.sh compiles it to net.wasm with clang)
+  value.bin/json entry/value.npz, the value path only, as float32 (tools/export_value.py)
+  tools/         dump_parity.py records the Python entry's choices; parity.js checks pw.js against them
+```
+
+The network runs in WebAssembly at about 0.26 ms a position on a 30-planet map (one core here; numpy in the entry
+takes 0.23), twelve times faster than the same code in plain JavaScript, which is kept as a fallback for browsers
+without WebAssembly SIMD. A move at full strength (all 128 launches re-ranked, eight options looking ahead) takes
+65 to 95 ms on a 30-planet map. Each tick the opponent gets 90% of the tick, at most 90 ms (the entry's own budget),
+so at Normal and Slow it has the same time as in the league, and at Fast (45 ms) it re-ranks fewer launches on big maps.
+If it needs longer, the game waits for it.
+
+Checked against the Python entry (`python planetwars/play/tools/dump_parity.py OUT.json`, then
+`node planetwars/play/tools/parity.js OUT.json`): four games replayed in the JavaScript rules match the official
+engine exactly; in 100 positions from them (both sides) the hand-scored planner and the entry with no time limit chose
+the same move as the Python entry every time, the hand scores agree to the last bit (the sums follow numpy's
+pairwise order, so ties break the same way) and the network's values to within 1e-6; and the entry against their greedy
+agent from the start of two games, two-planet captures and all, made the same move in all 527 ticks.
 
 ## How the agent works
 

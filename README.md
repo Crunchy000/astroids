@@ -5,7 +5,7 @@ Two fleets of five triangle ships fight it out in an Asteroids-style arena.
 - **Watch it in the browser:** https://crunchy000.github.io/astroids/ (`index.html`, scripted AI on both sides). It has synthesised sound effects (lasers, hits, explosions, asteroid thuds, panned by position): press any key to start audio, and M to mute.
 - **Train agents in Python:** `astroids_gym`, a [Gymnasium](https://gymnasium.farama.org/) (the maintained successor to OpenAI Gym) and [PettingZoo](https://pettingzoo.farama.org/) port of the same game.
 - **Enter a team in the competition:** [`competition/`](competition/README.md) runs the game as an AI competition in the [Planet Wars RTS](https://simonlucas.github.io/planet-wars-rts/) format: Docker entries that fly a team over a WebSocket, real-time matches with random settings, and a TrueSkill [leaderboard](competition/leaderboard.md).
-- **Separate project, Planet Wars:** [`planetwars/`](planetwars/README.md) is our entry for the Planet Wars RTS game itself, trained with JAX on a GPU. It has its own code, tests and Dockerfile and doesn't touch the asteroids game.
+- **Separate project, Planet Wars:** [`planetwars/`](planetwars/README.md) is our entry for the Planet Wars RTS game itself, trained with JAX on a GPU. It has its own code, tests and Dockerfile and doesn't touch the asteroids game. **Play against it in the browser:** https://crunchy000.github.io/astroids/planetwars/play/ (the entry ported to JavaScript and WebAssembly, see [`planetwars/play/`](planetwars/README.md#play-against-it-in-the-browser)).
 
 ## Rules
 
