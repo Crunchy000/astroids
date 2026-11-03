@@ -2,7 +2,7 @@
 
 Two fleets of five triangle ships fight it out in an Asteroids-style arena. 
 
-- **Watch it in the browser:** https://crunchy000.github.io/astorids/ (`index.html`, scripted AI on both sides). It has synthesised sound effects (lasers, hits, explosions, asteroid thuds, panned by position): press any key to start audio, and M to mute.
+- **Watch it in the browser:** https://crunchy000.github.io/astroids/ (`index.html`, scripted AI on both sides). It has synthesised sound effects (lasers, hits, explosions, asteroid thuds, panned by position): press any key to start audio, and M to mute.
 - **Train agents in Python:** `astroids_gym`, a [Gymnasium](https://gymnasium.farama.org/) (the maintained successor to OpenAI Gym) and [PettingZoo](https://pettingzoo.farama.org/) port of the same game.
 - **Enter a team in the competition:** [`competition/`](competition/README.md) runs the game as an AI competition in the [Planet Wars RTS](https://simonlucas.github.io/planet-wars-rts/) format: Docker entries that fly a team over a WebSocket, real-time matches with random settings, and a TrueSkill [leaderboard](competition/leaderboard.md).
 - **Separate project, Planet Wars:** [`planetwars/`](planetwars/README.md) is our entry for the Planet Wars RTS game itself, trained with JAX on a GPU. It has its own code, tests and Dockerfile and doesn't touch the asteroids game.
@@ -105,7 +105,7 @@ The agent wins mostly by staying alive: it dies about a third less often and sti
 
 ![Training progress](results/progress.png)
 
-Watch them on the website: https://crunchy000.github.io/astorids/videos.html (also linked from the game page). Videos (60 s with sound, same battle seed): [agent in seat 0](results/agent_seat0.mp4) · [bot in seat 0](results/bot_seat0.mp4).
+Watch them on the website: https://crunchy000.github.io/astroids/videos.html (also linked from the game page). Videos (60 s with sound, same battle seed): [agent in seat 0](results/agent_seat0.mp4) · [bot in seat 0](results/bot_seat0.mp4).
 
 On its own this agent doesn't help a whole team: when it flies all five blue ships, the team does about as well as an all-bot blue team (8 vs 10 wins out of 20 battles). Team training (below) fixes that.
 
