@@ -29,7 +29,7 @@
   button.primary { background: #10303b; border-color: #1d5566; color: #bfefff; }
   nav { display: flex; gap: 14px; font-size: 12px; }
   #hud { display: grid; grid-template-columns: 1fr auto 1fr; align-items: end; gap: 8px; padding: 2px 16px 4px; }
-  #hud .side { font-size: 13px; }
+  #hud .side { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   #hud .side b { font-size: 15px; }
   #hud .you { color: var(--blue); }
   #hud .ai { color: var(--red); text-align: right; }
@@ -55,22 +55,28 @@
   .card kbd { font: 12px var(--mono); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; color: var(--text); }
   #paused { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); color: var(--text-2);
             font-size: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 3px 10px; pointer-events: none; }
-  footer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; padding: 6px 16px 10px; }
+  /* rows whose text changes during play never wrap, so the map's size and place stay put */
+  footer { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px 16px; padding: 6px 16px 10px; height: 46px; }
+  footer > * { flex: none; }
+  #pause { min-width: 76px; } #sound { min-width: 88px; }
   .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
   .seg button { border: 0; border-radius: 0; background: transparent; color: var(--text-2); padding: 5px 10px; }
   .seg button + button { border-left: 1px solid var(--line); }
   .seg button.on { background: #10303b; color: #bfefff; }
-  #status { color: var(--text-3); font-size: 12px; flex: 1; min-width: 220px; }
-  #agentinfo { color: var(--text-3); font-size: 12px; }
+  #status, #agentinfo { color: var(--text-3); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  footer > #status { flex: 1 1 0; }
+  footer > #agentinfo { flex: 0 1 auto; }
   @media (max-width: 640px) {
     header { padding: 8px 12px 4px; }
     h1 { font-size: 14px; }
-    nav, .controls label .t, .grow, #status { display: none; }
+    nav, .controls label .t, .grow, #status, .sep { display: none; }
+    #hud .side .pl { display: block; }
     .controls { margin-left: 0; gap: 6px; }
     select, button { padding: 4px 6px; font-size: 12px; }
     #hud { padding: 2px 12px 4px; }
     #share { margin: 0 12px; }
-    footer { padding: 6px 12px 10px; }
+    footer { padding: 6px 12px 8px; height: 66px; flex-wrap: wrap; align-content: center; gap: 4px 10px; }
+    footer > #agentinfo { flex: 0 0 100%; }
   }
 </style>
 </head>
@@ -107,9 +113,9 @@
   <nav><a href="../../videos.html">Trained agents</a><a href="https://github.com/Crunchy000/astroids/tree/ccr-ccbf1ca0-erm5dw/planetwars">Source</a></nav>
 </header>
 <div id="hud">
-  <div class="side you"><b id="h-ships">0</b> ships · <span id="h-planets">0</span> planets<span class="grow"> · +<span id="h-growth">0</span>/tick</span></div>
+  <div class="side you"><b id="h-ships">0</b> ships<span class="sep"> · </span><span class="pl"><span id="h-planets">0</span> planets</span><span class="grow"> · +<span id="h-growth">0</span>/tick</span></div>
   <div class="mid">tick <span id="tick">0</span> / <span id="maxt">2000</span></div>
-  <div class="side ai"><b id="a-ships">0</b> ships · <span id="a-planets">0</span> planets<span class="grow"> · +<span id="a-growth">0</span>/tick</span></div>
+  <div class="side ai"><b id="a-ships">0</b> ships<span class="sep"> · </span><span class="pl"><span id="a-planets">0</span> planets</span><span class="grow"> · +<span id="a-growth">0</span>/tick</span></div>
 </div>
 <div id="share"><div id="share-h" style="background: var(--blue); width: 50%"></div><div style="flex: 1"></div><div id="share-a" style="background: var(--red); width: 50%"></div></div>
 <div id="stage">
@@ -566,7 +572,7 @@
     let status = '';
     if (queue.length) status = `${queue.length} order${queue.length > 1 ? 's' : ''} waiting (one launch a tick; Esc cancels)`;
     else if (selected.size) status = `${selected.size} selected: click a planet to send ${frac >= 1 ? 'all' : Math.round(frac * 100) + '%'}`;
-    else status = 'Click your planet, then a target. Shift-click or A for several. 1 to 4 set the fleet size.';
+    else status = 'Click your planet, then a target. Shift or A: several. 1 to 4: fleet size.';
     $('status').textContent = status;
   }
   function showAgentInfo() {
