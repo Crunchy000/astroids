@@ -404,3 +404,54 @@ def test_pair_launches_match_the_engine():
         if checked >= 12:
             break
     assert checked >= 12
+
+
+def test_pair_attacks_and_rescues_match_the_engine():
+    """Two planets attacking an enemy planet together, or saving one of ours about to fall (`pair_launches` with
+    kinds 'e' and 'd'), in positions from games of the hand-scored planner: the engine, stepping the first launch now
+    and the second `wait` ticks later with nobody else launching, ends with every planet as projected."""
+    checked = {"e": 0, "d": 0}
+    for seed in range(30):
+        random.seed(100 + seed)
+        params = GameParams(num_planets=24, max_ticks=2000, min_growth_rate=0.05, max_growth_rate=0.2,
+                            transporter_speed=3.0, initial_neutral_ratio=0.3)
+        gs = GameStateFactory(params).create_game()
+        model = ForwardModel(gs, params)
+        for tick in range(400):
+            if model.is_terminal():
+                break
+            if tick >= 40 and tick % 10 == 0:
+                s = entry_agent.arrays(gs, params.transporter_speed, params.max_ticks)
+                for me in (1, 2):
+                    for kind in ("e", "d"):
+                        if checked[kind] >= 10:
+                            continue
+                        c = planner.candidates(s, me, 90, planner.FRACTIONS, None, ("spare",), keep=True)
+                        pr = c and planner.pair_launches(s, me, c, kinds=kind, busy=True)
+                        if not pr:
+                            continue
+                        first, second, wait, owner, ships, _ = pr
+                        player = Player.Player1 if me == 1 else Player.Player2
+                        sim = ForwardModel(copy.deepcopy(gs), params)
+                        for t in range(c["horizon"]):
+                            move = first[0] if t == 0 else second[0] if t == wait[0] else None
+                            act = (Action(player_id=player, source_planet_id=int(move[0]), destination_planet_id=int(move[1]),
+                                          num_ships=float(move[2])) if move is not None else Action.do_nothing())
+                            sim.step({player: act, player.opponent(): Action.do_nothing()})
+                        got_owner = np.array([entry_agent.OWNER[p.owner] for p in sim.state.planets])
+                        got_ships = np.array([p.n_ships for p in sim.state.planets])
+                        np.testing.assert_array_equal(owner[0], got_owner)
+                        np.testing.assert_allclose(ships[0], got_ships, rtol=1e-6, atol=1e-6)
+                        assert got_owner[int(first[0, 1])] == me
+                        assert (s.owner[int(first[0, 1])] == me) == (kind == "d")
+                        checked[kind] += 1
+            s = entry_agent.arrays(gs, params.transporter_speed, params.max_ticks)
+            acts = {}
+            for me, player in ((1, Player.Player1), (2, Player.Player2)):
+                best = planner.plan(s, me, 90, planner.FRACTIONS, extras=("spare",))
+                acts[player] = (Action(player_id=player, source_planet_id=best[0], destination_planet_id=best[1],
+                                       num_ships=best[2]) if best else Action.do_nothing())
+            model.step(acts)
+        if min(checked.values()) >= 10:
+            break
+    assert checked["e"] >= 5 and checked["d"] >= 5, checked

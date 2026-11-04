@@ -38,6 +38,7 @@ VALUE = os.environ.get("PW_VALUE", os.path.join(os.path.dirname(os.path.abspath(
 JUDGE = os.environ.get("PW_JUDGE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "judge.npz"))  # see plan_ranked
 USE_POLICY = os.environ.get("PW_POLICY_CANDIDATE", "0") == "1"  # also try the neural policy's own move
 PAIRS = int(os.environ.get("PW_PAIRS", "200"))   # before this tick, also try two planets taking a neutral together (see `pair_launches`); 0: never
+PAIR_KINDS = os.environ.get("PW_PAIR_KINDS", "n")  # two-planet launches at: n neutrals (before PAIRS), e enemy planets, d ours about to fall; b: the second planet may be busy now
 PAIR_MOST = 16                                  # most such pairs scored by the network
 PAIR_WAIT = 30                                  # most ticks the second planet of a pair holds its ships for its launch
 
@@ -390,38 +391,74 @@ def replies(s, me, c, opts, fractions=FRACTIONS, extras=(), top=4, sources=12, f
     return out_o, out_s, found, acts
 
 
-def pair_launches(s, me, c, most=PAIR_MOST, max_wait=PAIR_WAIT):
-    """Two of our planets taking one neutral together, timed so their fleets land in the same tick (one tick apart if
+def pair_launches(s, me, c, most=PAIR_MOST, max_wait=PAIR_WAIT, kinds="n", busy=False):
+    """Two of our planets sending to one planet together, timed so their fleets land in the same tick (one tick apart if
     they are as far away): the farther launches now, the nearer after the difference in travel time (at least one
-    tick, at most `max_wait`). One of them sends all it can spare, the other what the capture still needs, plus one.
-    Only for neutrals that stay neutral in the nobody-launches projection and that no single launch in `c`
-    (= `candidates(..., keep=True)`) takes, so pairs add what one launch cannot do. Each pair is projected like a
-    launch (its three planets stepped through their landings; the later source counted as sending from the start).
+    tick, at most `max_wait`). One of them sends all it can spare, the other what the job still needs, plus one.
+    `kinds` says which planets: 'n' neutrals that stay neutral in the nobody-launches projection, 'e' enemy planets
+    that stay the enemy's, 'd' planets of ours that the projection loses (both fleets then land before it falls). Only
+    planets that no single launch in `c` (= `candidates(..., keep=True)`) leaves ours, so pairs add what one launch
+    cannot do. Each pair is projected like a launch (its three planets stepped through their landings; the later
+    source counted as sending from the start). With `busy`, the second planet may be one whose fleet is in flight now,
+    if that lands before the second launch.
     Returns None, or (first [P, 3], second [P, 3], wait [P], owner [P, n], ships [P, n], hand score [P]) for the `most`
-    best by hand score that take the neutral in the projection."""
+    best by hand score that leave the planet ours in the projection."""
     h, n = c["horizon"], s.ships.shape[0]
     a1, a2, d, po, ps = c["a1"], c["a2"], c["d"], c["po"], c["ps"]
-    free = s.valid & (s.owner == me) & ~s.tr_on & (s.ships >= 1.0)
-    spare = np.where(free & (po == me).all(0), np.floor(ps.min(0)), 0.0)        # what a planet can send and keep itself
+    opp = 3 - me
+    safe = s.valid & (s.owner == me) & (po == me).all(0) & (s.ships >= 1.0)
+    spare = np.where(safe, np.floor(ps.min(0)), 0.0)                              # what a planet can send and keep itself
+    free_at = np.where(s.tr_on, 1 << 30, 0)                                       # first tick each planet can launch in
+    if busy:  # a planet whose fleet is in flight can send the second fleet once that one has landed
+        for i in np.nonzero(safe & s.tr_on)[0]:
+            dst = s.tr_dest[i]
+            free_at[i] = int(arrival_step(np.linalg.norm(s.tr_pos[i] - s.pos[dst]), s.radius[dst], s.speed)) + 1
     rows = np.arange(c["cj"].size)
     taken = np.zeros(n, bool)
-    taken[c["cj"][c["owner"][rows, c["cj"]] == me]] = True                        # some single launch takes it
-    targets = np.nonzero(s.valid & (s.owner == 0) & (c["base_owner"] == 0) & ~taken)[0]
-    srcs = np.nonzero(spare >= 1.0)[0]
-    if targets.size == 0 or srcs.size < 2:
+    taken[c["cj"][c["owner"][rows, c["cj"]] == me]] = True                        # some single launch leaves it ours
+    open_ = s.valid & ~taken & (c["base_owner"] != me)
+    kind = np.full(n, "", dtype=object)
+    if "n" in kinds:
+        kind[open_ & (s.owner == 0) & (c["base_owner"] == 0)] = "n"
+    if "e" in kinds:
+        kind[open_ & (s.owner == opp) & (c["base_owner"] == opp)] = "e"
+    if "d" in kinds:
+        kind[open_ & (s.owner == me)] = "d"
+    targets = np.nonzero(kind != "")[0]
+    srcs = np.nonzero((spare >= 1.0) & (free_at <= max_wait))[0]
+    if targets.size == 0 or srcs.size < 2 or not (free_at[srcs] == 0).any():
         return None
     first, second, waits, k1s, k2s = [], [], [], [], []
     for j in targets:
+        kj = kind[j]
+        if kj == "d":
+            fall = int(np.argmax(po[:, j] != me)) if (po[:, j] != me).any() else h  # it is lost in the tick before this
+            if fall >= h:
+                continue
+            need0 = ps[fall, j] + 1.0                                             # the attacker's surplus, plus one
         k = arrival_step(d[srcs, j], s.radius[j], s.speed)
         for a in range(srcs.size):
+            if free_at[srcs[a]] > 0:                                              # the first launch is now
+                continue
             for b in range(srcs.size):
                 if a == b or k[a] < k[b]:                                         # a is the farther (or as far)
                     continue
                 wait = max(1, int(k[a] - k[b]))
                 t = k[b] + wait                                                   # the later landing
-                if wait > max_wait or t >= h or po[t, j] != 0:
+                if wait > max_wait or t >= h or wait < free_at[srcs[b]]:
                     continue
-                need = ps[t, j] + 1.0                                             # neutral ships when both have landed
+                if kj == "n":
+                    if po[t, j] != 0:
+                        continue
+                    need = ps[t, j] + 1.0                                         # neutral ships when both have landed
+                elif kj == "e":
+                    if po[t, j] != opp:
+                        continue
+                    need = ps[t, j] + 2.0 * s.growth[j] + 1.0                     # its ships then, a tick of growth either side
+                else:
+                    if t >= fall:
+                        continue
+                    need = need0
                 for full in (a, b):                                               # which one sends all it can spare
                     rest = b if full == a else a
                     x_full = spare[srcs[full]]
@@ -530,7 +567,7 @@ def totals_of(params, heads, s, me, owners, shipss, hand, tick, mix):
 
 
 def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=TOP, mix=MIX, budget_ms=BUDGET_MS, extras=(),
-                look=LOOK, look_ms=LOOK_MS, mix_open=MIX_OPEN, judge=None, pairs=PAIRS, out=None, reserved=()):
+                look=LOOK, look_ms=LOOK_MS, mix_open=MIX_OPEN, judge=None, pairs=PAIRS, out=None, reserved=(), pair_kinds=PAIR_KINDS):
     """Like `plan`, but the best launches by hand score (and waiting) are re-ranked by the value network, mixed with
     the hand score as (1 - mix) * value + mix * tanh(hand / 200). Launches go through the network eight at a time,
     best hand score first, until `top` have been seen or `budget_ms` (counted from the start of this call) would be
@@ -554,7 +591,8 @@ def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=
     tail = look.split(":")[-1].lstrip("0123456789") if look else ""
     focus, distinct = "f" in tail, "d" in tail
     ratio, per_opt = (judge[2], n_rep + 1) if judge is not None else (1.0, n_rep)  # look-ahead cost per option, in positions
-    c = candidates(s, me, horizon, fractions, None, extras, keep=ours > 0 or s.tick < pairs, reserved=reserved)
+    c = candidates(s, me, horizon, fractions, None, extras, keep=ours > 0 or s.tick < pairs or bool(pair_kinds.replace("n", "")),
+                   reserved=reserved)
     if c is None:
         return None
     order = np.argsort(-c["score"], kind="stable")[:top]
@@ -584,14 +622,16 @@ def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=
     seen_k = np.concatenate([order[seen[:cut]], [-1], order[seen[cut:]]]).astype(int)
     seen_t = np.concatenate([tot[rep[seen[:cut]]], [wait], tot[rep[seen[cut:]]]])
     best = int(np.argmax(seen_t))  # the first best on a tie, as before
-    if s.tick < pairs and out is not None and not reserved:  # two planets taking a neutral together, if that beats every single launch
-        pr = pair_launches(s, me, c)
+    kinds = (pair_kinds if s.tick < pairs else pair_kinds.replace("n", "")) if c.get("a1") is not None else ""
+    if kinds and out is not None and not reserved:  # two planets sending to one planet together, if that beats every single launch
+        pr = pair_launches(s, me, c, kinds=kinds, busy="b" in kinds)
         if pr is not None:
             first, second, wait, p_own, p_sh, p_hand = pr
             p_tot = totals_of(params, heads, s, me, list(p_own), list(p_sh), p_hand, tick, mix)
             b = int(np.argmax(p_tot))
             if p_tot[b] > seen_t[best]:
-                out["follow"] = (int(wait[b]), (int(second[b, 0]), int(second[b, 1]), float(second[b, 2])))
+                j = int(second[b, 1])
+                out["follow"] = (int(wait[b]), (int(second[b, 0]), j, float(second[b, 2])), int(s.owner[j]))
                 return int(first[b, 0]), int(first[b, 1]), float(first[b, 2])
     if ours and took > 0:
         left = budget_ms - (time.perf_counter() - started) * 1000 - look_ms
@@ -644,9 +684,10 @@ class PlannerAgent(NeuralAgent):
     """Tries every launch each tick (see the module docstring)."""
 
     def __init__(self, horizon=HORIZON, fractions=FRACTIONS, use_policy=USE_POLICY, value=VALUE, top=TOP, mix=MIX, budget_ms=BUDGET_MS, extras=SIZES,
-                 look=LOOK, judge=JUDGE):
+                 look=LOOK, judge=JUDGE, pairs=PAIRS, pair_kinds=PAIR_KINDS):
         super().__init__()
         self.horizon, self.fractions, self.use_policy, self.extras, self.look = horizon, tuple(fractions), use_policy, tuple(extras), look
+        self.pairs, self.pair_kinds = pairs, pair_kinds
         self.value, self.top, self.mix, self.budget_ms = None, top, mix, budget_ms
         if value and value != "off" and os.path.exists(value):
             params, heads = load(value)  # ranks the planner's best launches (single precision: twice as fast, same picks)
@@ -662,10 +703,10 @@ class PlannerAgent(NeuralAgent):
             if self.player not in (Player.Player1, Player.Player2) or not game_state.planets:
                 return Action.do_nothing()
             follow, self.follow = getattr(self, "follow", None), None
-            if follow is not None and follow[0] >= game_state.game_tick:  # the second half of a two-planet capture
+            if follow is not None and follow[0] >= game_state.game_tick:  # the second half of a two-planet launch
                 i, j, x = follow[1]
                 p, t = game_state.planets[i], game_state.planets[j]
-                if p.owner == self.player and p.transporter is None and t.owner == Player.Neutral:
+                if p.owner == self.player and p.transporter is None and OWNER[t.owner] == follow[2]:  # its target as planned
                     if follow[0] > game_state.game_tick:
                         self.follow = follow                                     # not yet: keep its planet out of other launches
                     elif p.n_ships >= x:
@@ -681,9 +722,10 @@ class PlannerAgent(NeuralAgent):
                 try:
                     out = {}
                     best = plan_ranked(s, me, *self.value, self.horizon, self.fractions, self.top, self.mix, self.budget_ms, self.extras, self.look,
-                                       judge=self.judge, out=out, reserved=(self.follow[1][0],) if self.follow else ())
+                                       judge=self.judge, pairs=self.pairs, out=out, reserved=(self.follow[1][0],) if self.follow else (),
+                                       pair_kinds=self.pair_kinds)
                     if "follow" in out:
-                        self.follow = (game_state.game_tick + out["follow"][0], out["follow"][1])
+                        self.follow = (game_state.game_tick + out["follow"][0], out["follow"][1], out["follow"][2])
                 except Exception as e:  # fall back to the hand-written score
                     print("PlannerAgent value error:", repr(e), flush=True)
                     best = plan(s, me, self.horizon, self.fractions, extras=self.extras)
