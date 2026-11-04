@@ -19,7 +19,7 @@
   header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; padding: 10px 16px 6px; }
   h1 { font: 700 16px/1.2 var(--mono); margin: 0; letter-spacing: 0.02em; white-space: nowrap; }
   h1 .b { color: var(--blue); } h1 .r { color: var(--red); }
-  .controls { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-left: auto; }
+  .controls { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; order: 2; flex-basis: 100%; }
   label { color: var(--text-2); font-size: 12px; display: flex; align-items: center; gap: 6px; }
   select, button {
     font: 13px var(--mono); color: var(--text); background: var(--panel); border: 1px solid var(--line);
@@ -27,7 +27,7 @@
   }
   button:hover, select:hover { border-color: #2c3242; }
   button.primary { background: #10303b; border-color: #1d5566; color: #bfefff; }
-  nav { display: flex; gap: 14px; font-size: 12px; }
+  nav { display: flex; gap: 14px; font-size: 12px; order: 1; margin-left: auto; }
   #hud { display: grid; grid-template-columns: 1fr auto 1fr; align-items: end; gap: 8px; padding: 2px 16px 4px; }
   #hud .side { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   #hud .side b { font-size: 15px; }
@@ -58,7 +58,10 @@
   /* rows whose text changes during play never wrap, so the map's size and place stay put */
   footer { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px 16px; padding: 6px 16px 10px; height: 46px; }
   footer > * { flex: none; }
-  #pause { min-width: 76px; } #sound { min-width: 88px; }
+  #pause { min-width: 76px; }
+  .toggle { min-width: 64px; } .toggle.on { background: #10303b; border-color: #1d5566; color: #bfefff; }
+  .toggle:not(.on) { color: var(--text-3); text-decoration: line-through; }
+  .narrow { display: none; }
   .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
   .seg button { border: 0; border-radius: 0; background: transparent; color: var(--text-2); padding: 5px 10px; }
   .seg button + button { border-left: 1px solid var(--line); }
@@ -69,7 +72,9 @@
   @media (max-width: 640px) {
     header { padding: 8px 12px 4px; }
     h1 { font-size: 14px; }
-    nav, .controls label .t, .grow, #status, .sep { display: none; }
+    nav, .controls label .t, .grow, #status, .sep, .wide { display: none; }
+    .narrow { display: inline; }
+    .seg button { padding: 5px 8px; }
     #hud .side .pl { display: block; }
     .controls { margin-left: 0; gap: 6px; }
     select, button { padding: 4px 6px; font-size: 12px; }
@@ -87,31 +92,31 @@
     <label><span class="t">Opponent</span>
       <select id="opp">
         <option value="entry">Hard: our league entry</option>
-        <option value="planner">Medium: planner, hand score only</option>
-        <option value="greedy">Easy: their greedy sample agent</option>
+        <option value="planner">Medium: planner only</option>
+        <option value="greedy">Easy: greedy sample agent</option>
       </select>
     </label>
-    <label><span class="t">Your advantage</span>
-      <select id="adv">
+    <label><span class="t">Advantage</span>
+      <select id="adv" title="A head start for you: more starting ships, the neutral planets on your half, and an agent that waits 100 ticks">
         <option value="0">Even start</option>
-        <option value="1">2× starting ships</option>
-        <option value="2">2× ships + your side's neutrals</option>
-        <option value="3">3× ships + neutrals + agent waits 100 ticks</option>
+        <option value="1">2× ships</option>
+        <option value="2">2× ships + neutrals</option>
+        <option value="3">3× + neutrals + 100-tick wait</option>
       </select>
     </label>
     <label><span class="t">Map</span>
       <select id="map">
-        <option value="0">League map (10 to 30 planets)</option>
-        <option value="10">Small map (10)</option>
-        <option value="20">Medium map (20)</option>
-        <option value="30">Large map (30)</option>
+        <option value="0">League (10 to 30)</option>
+        <option value="10">Small (10)</option>
+        <option value="20">Medium (20)</option>
+        <option value="30">Large (30)</option>
       </select>
     </label>
     <label><span class="t">Speed</span>
-      <select id="speed">
-        <option value="160">Slow (6 ticks/s)</option>
-        <option value="100" selected>Normal (10 ticks/s)</option>
-        <option value="50">Fast (20 ticks/s)</option>
+      <select id="speed" title="Slow: 6 ticks a second, Normal: 10, Fast: 20">
+        <option value="160">Slow</option>
+        <option value="100" selected>Normal</option>
+        <option value="50">Fast</option>
       </select>
     </label>
     <button id="pause" title="Space">Pause</button>
@@ -136,12 +141,12 @@
         that lands with more ships than the planet holds takes it. Planets you own grow ships every tick, bigger ones
         faster. Each planet can have only one fleet in flight at a time.</p>
       <p>Win by taking every enemy planet, or by having more ships on planets after 2,000 ticks. Want a head start?
-        <b>Your advantage</b> (top bar) multiplies your starting ships, hands you the neutral planets on your side and can
+        <b>Advantage</b> (top bar) multiplies your starting ships, hands you the neutral planets on your side and can
         make the agent sit out the first 100 ticks.</p>
       <p><b>Controls.</b> Click one of your planets, then click where to send (any planet, your own included). Drag from
         a planet works too. <kbd>Shift</kbd>-click or <kbd>A</kbd> picks several. <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd>
         <kbd>4</kbd> send a quarter, half, three quarters or all. <kbd>Space</kbd> pauses, and you can still give orders
-        while paused. <kbd>M</kbd> turns the sound on or off. Each side launches at most one fleet a tick, so extra orders wait their turn.</p>
+        while paused. <kbd>M</kbd> turns all sound on or off, <kbd>B</kbd> just the music. Each side launches at most one fleet a tick, so extra orders wait their turn.</p>
       <p id="oppdesc"></p>
       <div class="row"><button class="primary" id="start" disabled>Loading the agent…</button></div>
     </div>
@@ -158,8 +163,9 @@
   <span class="seg" id="frac">
     <button data-f="0.25">25%</button><button data-f="0.5" class="on">50%</button><button data-f="0.75">75%</button><button data-f="1">All</button>
   </span>
-  <button id="selall" title="A">Select all</button>
-  <button id="sound" title="M">Sound on</button>
+  <button id="selall" title="A"><span class="wide">Select all</span><span class="narrow">All</span></button>
+  <button id="sound" class="toggle" title="Sound effects and music (M)">Sound</button>
+  <button id="music" class="toggle" title="Background music (B)">Music</button>
   <span id="status"></span>
   <span id="agentinfo"></span>
 </footer>
@@ -327,9 +333,99 @@
   function setSound(on) {
     soundOn = on;
     try { localStorage.setItem('pw-sound', on ? 'on' : 'off'); } catch (e) { /* not remembered */ }
-    $('sound').textContent = on ? 'Sound on' : 'Sound off';
+    $('sound').classList.toggle('on', on);
     if (on) initAudio();
+    musicLevel();
   }
+
+  // ---- background music: an original ambient piece in the Auralux style. A slow pad of chords (A minor, F, C, G,
+  // the pad of tools/aura.py), and a pentatonic melody of glassy plucks that wanders a step or two at a time, through
+  // an echo. The busier the map (fleets in flight), the more notes.
+  let musicOn = true, bus = null, echoIn = null, padFilter = null, musicNext = 0, beat = 0, mel = 3;
+  try { musicOn = localStorage.getItem('pw-music') !== 'off'; } catch (e) { /* storage blocked: music on */ }
+  const BEAT = 0.75, BEATS_PER_CHORD = 8;
+  const CHORDS = [[110.0, 130.81, 164.81, 220.0], [87.31, 110.0, 130.81, 174.61], [130.81, 164.81, 196.0, 261.63], [98.0, 123.47, 146.83, 196.0]];
+  const MELODY = [440.0, 523.25, 587.33, 659.25, 783.99, 880.0, 1046.5, 1174.66];       // A minor pentatonic, A4 to D6
+  const CHORD_TONES = [[0, 1, 3, 5, 6], [0, 1, 5, 6], [1, 3, 4, 6], [2, 4, 7]];         // melody notes in each chord
+  function setupMusic() {
+    bus = audio.createGain(); bus.gain.value = 0; bus.connect(master);
+    padFilter = audio.createBiquadFilter(); padFilter.type = 'lowpass'; padFilter.frequency.value = 900; padFilter.Q.value = 0.4;
+    padFilter.connect(bus);
+    const lfo = audio.createOscillator(), depth = audio.createGain();       // the pad opens and closes slowly
+    lfo.frequency.value = 0.05; depth.gain.value = 350; lfo.connect(depth); depth.connect(padFilter.frequency); lfo.start();
+    echoIn = audio.createGain();
+    const delay = audio.createDelay(2), fb = audio.createGain(), tone_ = audio.createBiquadFilter(), wet = audio.createGain();
+    delay.delayTime.value = BEAT * 0.75; fb.gain.value = 0.38; tone_.type = 'lowpass'; tone_.frequency.value = 2400; wet.gain.value = 0.5;
+    echoIn.connect(delay); delay.connect(tone_); tone_.connect(fb); fb.connect(delay); tone_.connect(wet); wet.connect(bus);
+    musicLevel();
+  }
+  function musicLevel() {
+    if (!bus) return;
+    const t = audio.currentTime;
+    bus.gain.cancelScheduledValues(t);
+    bus.gain.setTargetAtTime(soundOn && musicOn ? 0.9 : 0, t, 0.4);
+  }
+  function setMusic(on) {
+    musicOn = on;
+    try { localStorage.setItem('pw-music', on ? 'on' : 'off'); } catch (e) { /* not remembered */ }
+    $('music').classList.toggle('on', on);
+    if (on) initAudio();
+    musicLevel();
+  }
+  function padChord(notes, t, dur) {
+    for (const f of notes) {
+      for (const [type, cents, vol] of [['triangle', -7, 0.016], ['sine', 7, 0.02]]) {
+        const o = audio.createOscillator(), g = audio.createGain();
+        o.type = type; o.frequency.value = f; o.detune.value = cents;
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(vol, t + 2.0);                      // slow swell in
+        g.gain.setValueAtTime(vol, t + dur);
+        g.gain.linearRampToValueAtTime(0, t + dur + 2.5);                  // and out, under the next chord
+        o.connect(g); g.connect(padFilter);
+        o.start(t); o.stop(t + dur + 2.6);
+      }
+    }
+  }
+  function pluckNote(f, t, vol) {
+    const g = audio.createGain(), o1 = audio.createOscillator(), o2 = audio.createOscillator(), g2 = audio.createGain();
+    o1.type = 'sine'; o1.frequency.value = f; o2.type = 'sine'; o2.frequency.value = 2 * f;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.6);
+    g2.gain.setValueAtTime(0.3, t); g2.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+    o1.connect(g); o2.connect(g2); g2.connect(g);
+    let out = g;
+    if (audio.createStereoPanner) { const pan = audio.createStereoPanner(); pan.pan.value = Math.random() * 0.8 - 0.4; g.connect(pan); out = pan; }
+    out.connect(bus); out.connect(echoIn);
+    o1.start(t); o2.start(t); o1.stop(t + 1.7); o2.stop(t + 1.7);
+  }
+  function nearest(choices, k) { return choices.reduce((a, c) => (Math.abs(c - k) < Math.abs(a - k) ? c : a), choices[0]); }
+  function scheduleBeat(t, k) {
+    const c = Math.floor(k / BEATS_PER_CHORD) % CHORDS.length, inChord = k % BEATS_PER_CHORD;
+    if (inChord === 0) padChord(CHORDS[c], t, BEAT * BEATS_PER_CHORD);
+    const fleets = st ? st.planets.reduce((a, p) => a + (p.tr ? 1 : 0), 0) : 0;
+    const busy = Math.min(1, fleets / 12);
+    if (inChord === 0) { mel = nearest(CHORD_TONES[c], mel); pluckNote(MELODY[mel], t, 0.04); return; }
+    if (Math.random() < 0.28 + 0.35 * busy) {
+      let step = [-2, -1, -1, 1, 1, 2][Math.floor(Math.random() * 6)];
+      if (mel + step < 0 || mel + step >= MELODY.length) step = -step;
+      mel += step;
+      if (inChord % 4 === 0) mel = nearest(CHORD_TONES[c], mel);          // land on the chord on the half bar
+      pluckNote(MELODY[mel], t, 0.03);
+      if (Math.random() < 0.25 * busy) {                                 // now and then a quick second note
+        const m2 = Math.max(0, Math.min(MELODY.length - 1, mel + (Math.random() < 0.5 ? 1 : -1)));
+        pluckNote(MELODY[m2], t + BEAT / 2, 0.022);
+      }
+    }
+  }
+  setInterval(() => {                                                      // schedule a little ahead of the clock
+    if (!audio || audio.state !== 'running' || !started) return;
+    if (!bus) setupMusic();
+    if (!soundOn || !musicOn) { musicNext = 0; return; }
+    const now = audio.currentTime;
+    if (musicNext < now) { musicNext = now + 0.1; beat = 0; }
+    while (musicNext < now + 1.2) { scheduleBeat(musicNext, beat++); musicNext += BEAT; }
+  }, 200);
 
   let particles = [], rings = [], flashes = [];
   const GLOW = { 0: '#b9bdc7', 1: '#4cc9f0', 2: '#ff7b54' };
@@ -470,6 +566,7 @@
   $('speed').onchange = () => { const url = new URL(location.href); url.searchParams.set('speed', $('speed').value); history.replaceState(null, '', url); };
   $('start').onclick = () => { started = true; $('intro').hidden = true; lastStep = performance.now(); initAudio(); };
   $('sound').onclick = () => setSound(!soundOn);
+  $('music').onclick = () => setMusic(!musicOn);
   canvas.addEventListener('pointerdown', initAudio);
   window.addEventListener('keydown', e => {
     if (e.target.tagName === 'SELECT') return;
@@ -479,6 +576,7 @@
     else if (e.key === 'n' || e.key === 'N') newGame(false);
     else if (e.key === 'Escape') { if (selected.size) selected.clear(); else queue = []; }
     else if (e.key === 'm' || e.key === 'M') setSound(!soundOn);
+    else if (e.key === 'b' || e.key === 'B') setMusic(!musicOn);
     else if (e.key === 'Enter' && !$('intro').hidden && !$('start').disabled) $('start').click();
   });
 
@@ -625,7 +723,7 @@
     requestAnimationFrame(frame);
   }
 
-  $('sound').textContent = soundOn ? 'Sound on' : 'Sound off';
+  $('sound').classList.toggle('on', soundOn); $('music').classList.toggle('on', musicOn);
   window.pwGame = { state: () => st, view, queue: () => queue };  // for tests
   resize();
   newGame(true);

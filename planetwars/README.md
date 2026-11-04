@@ -44,12 +44,15 @@ https://crunchy000.github.io/astroids/planetwars/play/ is Planet Wars against th
 server. You are blue, the opponent is red: click (or drag from) your planet, then a target; shift-click or `A` picks
 several, `1` to `4` set the fleet size, Space pauses (orders can still be given), `M` mutes. League-style maps (or a fixed
 size), three speeds, and three opponents: the entry as submitted (Hard), the planner with its hand score only (Medium)
-and their greedy sample agent (Easy). The address keeps the map's seed, so a map can be shared. **Your advantage** gives the human a head start:
+and their greedy sample agent (Easy). The address keeps the map's seed, so a map can be shared. **Advantage** gives the human a head start:
 twice the ships on their starting planets; that plus the neutral planets on their half; or three times the ships, the
 neutrals, and an opponent that sits out the first 100 ticks. As a guide, with the entry's time cut to 30 ms a move, on
 8 league maps: their greedy agent playing your side won 0, 5, 7 and 8 games at the four levels (even first), and the
 hand-scored planner 0, 7, 8 and 8. A person issues far fewer orders than either, so expect to need a level more. Launches, clashes and
-captures play the Auralux-style pentatonic sound set (Web Audio, synthesized, no samples).
+captures play the Auralux-style pentatonic sound set (Web Audio, synthesized, no samples), over an original ambient
+piece in the same style: a slow pad of A minor, F, C and G (the pad of `tools/aura.py`) and a pentatonic melody of
+glassy plucks through an echo that wanders a step or two at a time and plays more notes the more fleets are in flight
+(`B` turns the music off, `M` all sound).
 
 ```
 play/
