@@ -2,7 +2,8 @@
 
 Runs in the official Python engine (vendored in entry/) on a league map:
     python tools/record_game.py --seed 3 --out game.mp4 --still still.png
-Needs Pillow and an ffmpeg binary.
+The soundtrack is the browser game's sound effects and music (tools/aura_sound.py); --silent leaves it out.
+Needs Pillow, scipy and an ffmpeg binary.
 """
 import argparse
 import math
@@ -23,6 +24,8 @@ from core.forward_model import ForwardModel  # noqa: E402
 from core.game_state import GameParams, Player  # noqa: E402
 from core.game_state_factory import GameStateFactory  # noqa: E402
 from pwjax.maps import cog2026_params  # noqa: E402
+
+import aura_sound  # noqa: E402
 
 SCALE = 2
 W, H = 640 * SCALE, 480 * SCALE
@@ -114,6 +117,7 @@ def main():
     ap.add_argument("--still-tick", type=int, default=300)
     ap.add_argument("--every", type=int, default=2, help="game ticks per video frame")
     ap.add_argument("--fps", type=int, default=30)
+    ap.add_argument("--silent", action="store_true", help="no soundtrack")
     args = ap.parse_args()
     rng = np.random.default_rng(args.seed)
     random.seed(args.seed)
@@ -129,24 +133,41 @@ def main():
     names = ("Our model", "Their greedy agent" if args.opponent == "greedy" else "Their careful random agent")
     model = ForwardModel(gs, params)
     base = starfield()
+    out = pathlib.Path(args.out)
+    video = out if args.silent else out.with_name(out.stem + ".video.mp4")
     ff = subprocess.Popen(["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
                            "-s", f"{W}x{H + TOP}", "-r", str(args.fps), "-i", "-", "-c:v", "libx264",
-                           "-pix_fmt", "yuv420p", "-crf", "23", "-movflags", "+faststart", args.out],
+                           "-pix_fmt", "yuv420p", "-crf", "23", "-movflags", "+faststart", str(video)],
                           stdin=subprocess.PIPE)
+    own = {Player.Neutral: 0, Player.Player1: 1, Player.Player2: 2}
+    events, frames = [], 0
     while not model.is_terminal():
         if gs.game_tick % args.every == 0:
             frame = draw(gs, base, names, params.max_ticks)
             ff.stdin.write(frame.tobytes())
+            frames += 1
             if args.still and gs.game_tick == args.still_tick:
                 frame.save(args.still)
+        t, before = gs.game_tick, aura_sound.snapshot(gs.planets, own)
         model.step({Player.Player1: me.get_action(gs), Player.Player2: other.get_action(gs)})
+        events += aura_sound.events_between(t, before, aura_sound.snapshot(gs.planets, own))
     leader = model.get_leader()
     banner = {Player.Player1: f"{names[0]} wins", Player.Player2: f"{names[1]} wins"}.get(leader, "Draw")
     end = draw(gs, base, names, params.max_ticks, banner=f"{banner} at tick {gs.game_tick}")
     for _ in range(args.fps * 3):
         ff.stdin.write(end.tobytes())
+        frames += 1
     ff.stdin.close()
     ff.wait()
+    if not args.silent:  # the browser game's sound, then the two put together
+        ticks, fleets = aura_sound.from_events(events)
+        wav = out.with_name(out.stem + ".wav")
+        aura_sound.write_wav(wav, aura_sound.soundtrack(ticks, fleets, 1.0 / (args.every * args.fps), frames / args.fps,
+                                                        own.get(leader, 0), end_tick=gs.game_tick))
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(video), "-i", str(wav), "-c:v", "copy", "-c:a", "aac",
+                        "-b:a", "160k", "-shortest", "-movflags", "+faststart", str(out)], check=True)
+        video.unlink()
+        wav.unlink()
     print(f"{params.num_planets} planets, speed {params.transporter_speed:.2f}: {banner} at tick {gs.game_tick}")
 
 

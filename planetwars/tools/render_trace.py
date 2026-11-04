@@ -6,7 +6,7 @@ official engine tick for tick) and each tick is drawn the way tools/record_game.
 
     python tools/render_trace.py trace.jsonl --out game.mp4 --ours "Our planner" --theirs "TeamTitansAgentV3"
 
-The default style (tools/aura.py) is Auralux-like, with a synthesized soundtrack; `--style classic` draws plain
+The default style (tools/aura.py) is Auralux-like, with the browser game's sound and music; `--style classic` draws plain
 shapes without sound. Needs numpy, scipy, Pillow, opencv-python-headless and an ffmpeg binary.
 """
 import argparse
@@ -101,7 +101,7 @@ def render_auralux(args, rows, s, n, names, launches, nothing, step):
     frames = (final["t"] + args.every - 1) // args.every
     hold = args.fps * 3
     wav = str(pathlib.Path(args.out).with_suffix(".wav"))
-    aura.synthesize(events, frames + hold, args.fps, args.every, winner, wav)
+    aura.synthesize(events, frames + hold, args.fps, args.every, winner, wav, end_tick=final["t"])
     base = aura.background()
     ff = aura.encode(args.out, wav, args.fps)
     tick_rate = args.fps * args.every
@@ -129,7 +129,7 @@ def main():
     ap.add_argument("--ours", default="Our planner")
     ap.add_argument("--theirs", default="TeamTitansAgentV3")
     ap.add_argument("--style", choices=["auralux", "classic"], default="auralux",
-                    help="auralux: glowing orbs, swarming fleets, bloom and a synthesized soundtrack; classic: plain shapes, silent")
+                    help="auralux: glowing orbs, swarming fleets, bloom and the browser game's sound; classic: plain shapes, silent")
     ap.add_argument("--every", type=int, default=1, help="game ticks per video frame")
     ap.add_argument("--fps", type=int, default=30)
     ap.add_argument("--max-ticks", type=int, default=2000)

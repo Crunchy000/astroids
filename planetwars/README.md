@@ -33,7 +33,8 @@ planetwars/
     selfcheck.py   play the official sample agents in the official Python engine
     core/ agents/ client_server/   vendored from planet-wars-rts (MIT, see LICENSE-planet-wars-rts)
   tests/           parity tests against the official engine
-  tools/           record_game.py (render a game as an MP4), remote_match.py, TraceGame.kt + render_trace.py + aura.py (our entry vs TeamTitansAgentV3 as an MP4, Auralux-style with sound)
+  tools/           record_game.py (render a game as an MP4), remote_match.py, TraceGame.kt + render_trace.py + aura.py (our entry vs TeamTitansAgentV3 as an MP4, Auralux-style),
+                   aura_sound.py (the soundtrack of both: the browser game's sound effects and music)
   media/           recorded games: against their greedy agent, and two against TeamTitansAgentV3
   play/            the game in the browser against the entry (https://crunchy000.github.io/astroids/planetwars/play/)
 ```
@@ -50,9 +51,10 @@ neutrals, and an opponent that sits out the first 100 ticks. As a guide, with th
 8 league maps: their greedy agent playing your side won 0, 5, 7 and 8 games at the four levels (even first), and the
 hand-scored planner 0, 7, 8 and 8. A person issues far fewer orders than either, so expect to need a level more. Launches, clashes and
 captures play the Auralux-style pentatonic sound set (Web Audio, synthesized, no samples), over an original ambient
-piece in the same style: a slow pad of A minor, F, C and G (the pad of `tools/aura.py`) and a pentatonic melody of
+piece in the same style: a slow pad of A minor, F, C and G and a pentatonic melody of
 glassy plucks through an echo that wanders a step or two at a time and plays more notes the more fleets are in flight
-(`B` turns the music off, `M` all sound).
+(`B` turns the music off, `M` all sound). The match videos use this same sound (see below), so if you change it here,
+change `tools/aura_sound.py` with it: `tests/test_sound.py` fails when the two drift apart.
 
 ```
 play/
@@ -470,9 +472,18 @@ and [as Player 2 (orange), a win at tick 969 on a 24-planet map](media/game_vs_t
 `tools/TraceGame.kt` (drop it in `app/src/main/kotlin/games/planetwars/runners/` of their repo) plays the game there against the
 entry's server and writes the map and every launch; `python tools/render_trace.py trace.jsonl --out game.mp4` replays that in the
 JAX rules, which match the official engine tick for tick (it checks the final ship counts), and draws it: glowing orbs with a dot
-orbiting for each ship, swarming fleets and ripples as in Auralux, with a synthesized ambient pad, a pluck for each launch, a thump
-for each hit and a chime when a planet changes hands (`--style classic` for the plain silent version). The two videos in `media/`
+orbiting for each ship, swarming fleets and ripples as in Auralux (`--style classic` for the plain silent version). The two videos in `media/`
 are the plain ones; the Auralux-style versions are about 5 and 10 MB and are kept with the project files, not in git.
+
+**Sound in videos.** New videos from both `render_trace.py` and `record_game.py` (`--silent` to leave it out) have the
+[browser game's](#play-against-it-in-the-browser) sound: the same pentatonic chimes for launches, hits and captures (rising
+when blue takes a planet, falling for orange), the same closing arpeggio for the winner, and the same ambient music, whose
+melody gets busier with more fleets in flight. `tools/aura_sound.py` renders it offline with numpy and scipy, note for note
+from the page's Web Audio code. Against Chromium's own rendering of the same notes, the difference between the two
+spectrograms is 18 to 52 dB below the sound (the music alone matches sample for sample to 30 to 80 dB; Chromium starts a
+chime's sine at a slightly different phase, which you cannot hear). Videos run faster than the game (30 ticks a second against 10), so the
+effects are paced as in the game at Normal speed: at most one of each kind every 0.1 s, and the low pulse every 2.5 s. Keep
+the two in step: `tests/test_sound.py` checks the notes, levels and calls in `play/index.html` against `aura_sound.py`.
 
 ## Checks
 
@@ -484,7 +495,8 @@ cd entry && python selfcheck.py    # official engine, submission-check settings 
 ```
 
 The parity tests replay fuzzed games (legal and illegal actions) in both engines and compare every
-planet and fleet each tick; their greedy agent's moves are compared too.
+planet and fleet each tick; their greedy agent's moves are compared too. `tests/test_sound.py` checks that the videos'
+soundtrack (`tools/aura_sound.py`) still has the browser game's notes and levels.
 
 ## Training
 

@@ -2,20 +2,19 @@
 
 Planets are glowing orbs ringed in their owner's colour, with one small dot orbiting for each ship. A fleet is a
 swarm of dots with a comet tail. Launches, arrivals and captures send out ripples, and the whole frame gets a soft
-bloom. The sound is synthesized from nothing (no samples): a slow ambient pad, a glassy pluck for each launch, a
-low thump when a fleet hits an enemy planet, a rising arpeggio and a bell when a planet changes hands, and a
-chord when the game ends. Used by tools/render_trace.py.
+bloom. The sound is the browser game's (play/index.html), rendered by tools/aura_sound.py: pentatonic chimes for
+launches, impacts and captures, a closing arpeggio for the winner, and the game's ambient music (a slow pad and a
+wandering melody of plucks that gets busier with more fleets in flight). Used by tools/render_trace.py.
 """
 import math
 import subprocess
-import wave
 from collections import namedtuple
 
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
-from scipy.signal import fftconvolve
 
+import aura_sound
 from core.game_state import Player
 
 S = 2                                   # pixels per game unit
@@ -25,7 +24,6 @@ COL = {0: (150, 160, 182), 1: (70, 170, 255), 2: (255, 112, 72)}   # neutral, pl
 OID = {Player.Neutral: 0, Player.Player1: 1, Player.Player2: 2}
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-SR = 44100
 
 Event = namedtuple("Event", "t kind x y r player n src hostile")   # tick, 'launch' | 'arrive' | 'capture', position, planet radius, player, ships, planet, hits a planet that is not the fleet's
 
@@ -207,122 +205,15 @@ def banner_colour(banner, names):
 
 # ------------------------------------------------------------------ sound
 
-PENT = [0, 3, 5, 7, 10]
-
-
-def hz(base, step):
-    octave, k = divmod(step, 5)
-    return base * 2 ** ((PENT[k] + 12 * octave) / 12)
-
-
-def _put(buf, start, sig, pan):
-    i = int(start * SR)
-    n = min(len(sig), buf.shape[0] - i)
-    if n <= 0 or i < 0:
-        return
-    buf[i:i + n, 0] += sig[:n] * math.cos(pan * math.pi / 2)
-    buf[i:i + n, 1] += sig[:n] * math.sin(pan * math.pi / 2)
-
-
-def _t(seconds):
-    return np.arange(int(seconds * SR)) / SR
-
-
-def pluck(f, amp):
-    t = _t(1.6)
-    env = (1 - np.exp(-t / 0.003)) * np.exp(-t / 0.30)
-    sig = np.sin(2 * np.pi * f * t) + 0.35 * np.sin(2 * np.pi * 2 * f * t) * np.exp(-t / 0.12) + 0.12 * np.sin(2 * np.pi * 3 * f * t) * np.exp(-t / 0.06)
-    return (sig * env * amp).astype(np.float32)
-
-
-def thump(amp):
-    t = _t(0.5)
-    phase = 2 * np.pi * np.cumsum(52 + 90 * np.exp(-t / 0.05)) / SR
-    return (np.sin(phase) * (1 - np.exp(-t / 0.002)) * np.exp(-t / 0.11) * amp).astype(np.float32)
-
-
-def bell(f, amp):
-    t = _t(2.4)
-    sig = sum(a * np.sin(2 * np.pi * f * m * t) * np.exp(-t / d) for m, a, d in ((1, 1.0, 1.3), (2.76, 0.5, 0.8), (5.4, 0.25, 0.45), (8.93, 0.12, 0.25)))
-    return (sig * (1 - np.exp(-t / 0.002)) * amp).astype(np.float32)
-
-
-def ping(f, amp):
-    t = _t(0.7)
-    return (np.sin(2 * np.pi * f * t) * (1 - np.exp(-t / 0.002)) * np.exp(-t / 0.12) * amp).astype(np.float32)
-
-
-def pad(duration):
-    """A slow bed of chords (A minor, F, C, G), six seconds each, notes detuned a little for width."""
-    chords = [[110.0, 130.8, 164.8, 220.0], [87.3, 110.0, 130.8, 174.6], [130.8, 164.8, 196.0, 261.6], [98.0, 123.5, 146.8, 196.0]]
-    buf = np.zeros((int(duration * SR) + SR, 2), np.float32)
-    seg = 6.0
-    for c in range(int(duration / seg) + 1):
-        chord = chords[c % len(chords)]
-        t = _t(seg + 2.0)
-        env = np.minimum(np.minimum(t / 2.0, (seg + 2.0 - t) / 2.0), 1.0).clip(0, 1) ** 2
-        for k, f in enumerate(chord):
-            for side, detune in ((0, 0.997), (1, 1.003)):
-                sig = sum(a * np.sin(2 * np.pi * f * detune * h * t + 0.5 * k) for h, a in ((1, 1.0), (2, 0.35), (3, 0.14), (4, 0.06)))
-                sig *= (0.85 + 0.15 * np.sin(2 * np.pi * (0.11 + 0.03 * k) * t)) * env * 0.022
-                i = int(c * seg * SR)
-                n = min(len(sig), buf.shape[0] - i)
-                if n > 0:
-                    buf[i:i + n, side] += sig[:n]
-    return buf
-
-
-def synthesize(events, n_frames, fps, tick_per_frame, winner, path):
-    """Write the soundtrack for `events` (see find_events) to a WAV file at `path`."""
-    rng = np.random.default_rng(11)
-    dur = n_frames / fps
-    mix = pad(dur + 1.0)
-    when = lambda t: t / tick_per_frame / fps  # noqa: E731
-    last_launch = {1: -99, 2: -99}
-    last_arrive = {}
-    base = {1: 440.0, 2: 220.0}
-    pan = {1: 0.32, 2: 0.68}
-    for ev in sorted(events, key=lambda e: e.t):
-        s, p = when(ev.t), ev.player
-        big = min(1.0, 0.35 + math.log10(ev.n + 1) / 2.2)
-        if ev.kind == "launch" and ev.t - last_launch[p] >= 6 and ev.n >= 2:
-            last_launch[p] = ev.t
-            _put(mix, s, pluck(hz(base[p], (ev.src * 2 + int(ev.n)) % 10), 0.20 * big), pan[p])
-        elif ev.kind == "arrive":
-            if ev.t - last_arrive.get(ev.src, -99) < 6:
-                continue
-            last_arrive[ev.src] = ev.t
-            if ev.hostile:
-                _put(mix, s, thump(0.30 * big), pan[p])
-            elif ev.n >= 3:
-                _put(mix, s, ping(hz(base[p] * 2, ev.src % 5 + 2), 0.07 * big), pan[p])
-        elif ev.kind == "capture":
-            steps = [0, 2, 4] if p == 1 else [-3, -1, 1]
-            for k, st in enumerate(steps):
-                _put(mix, s + 0.085 * k, pluck(hz(base[p] * 2, (ev.src % 3) + st + 3), 0.22), pan[p])
-            _put(mix, s + 0.2, bell(hz(base[p], (ev.src % 5) + 5), 0.10), pan[p])
-    if winner in (1, 2):
-        end = dur - 3.0
-        chord = [220.0, 277.2, 329.6, 440.0] if winner == 1 else [196.0, 246.9, 293.7, 392.0]
-        t = _t(3.4)
-        env = np.minimum(t / 0.5, 1.0) * np.exp(-t / 1.6)
-        for k, f in enumerate(chord):
-            _put(mix, end, (np.sin(2 * np.pi * f * t) + 0.3 * np.sin(2 * np.pi * 2 * f * t)).astype(np.float32) * env * 0.09, 0.3 + 0.13 * k)
-    mix = mix[: int(dur * SR)]
-    ir_t = _t(1.4)
-    wet = np.stack([fftconvolve(mix[:, c], rng.standard_normal(len(ir_t)) * np.exp(-ir_t / 0.42) * 0.004, mode="full")[: len(mix)] for c in (0, 1)], 1)
-    mix = mix + 0.55 * wet
-    fade = np.ones(len(mix), np.float32)
-    k = int(1.0 * SR)
-    fade[-k:] = np.linspace(1, 0, k)
-    k0 = int(0.4 * SR)
-    fade[:k0] = np.linspace(0, 1, k0)
-    mix = np.tanh(mix / max(np.abs(mix).max(), 1e-6) * 1.6) / np.tanh(1.6) * 0.89 * fade[:, None]
-    with wave.open(path, "wb") as w:
-        w.setnchannels(2)
-        w.setsampwidth(2)
-        w.setframerate(SR)
-        w.writeframes((mix * 32767).astype("<i2").tobytes())
+def synthesize(events, n_frames, fps, tick_per_frame, winner, path, end_tick=None):
+    """Write the soundtrack for `events` (see find_events) to a WAV file at `path`: the browser game's sound effects
+    and music (tools/aura_sound.py), timed to the video. The winner's arpeggio plays at `end_tick` (the game's last
+    tick; by default the tick after the last event)."""
+    ticks, fleets = aura_sound.from_events(events)
+    seconds_per_tick = 1.0 / (tick_per_frame * fps)
+    end_tick = max(len(fleets) - 1, 0) if end_tick is None else end_tick
+    track = aura_sound.soundtrack(ticks, fleets, seconds_per_tick, n_frames / fps, winner, end_tick=end_tick)
+    aura_sound.write_wav(path, track)
 
 
 def encode(path, audio, fps):

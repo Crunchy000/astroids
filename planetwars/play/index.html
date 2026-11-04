@@ -338,9 +338,10 @@
     musicLevel();
   }
 
-  // ---- background music: an original ambient piece in the Auralux style. A slow pad of chords (A minor, F, C, G,
-  // the pad of tools/aura.py), and a pentatonic melody of glassy plucks that wanders a step or two at a time, through
-  // an echo. The busier the map (fleets in flight), the more notes.
+  // ---- background music: an original ambient piece in the Auralux style. A slow pad of chords (A minor, F, C, G),
+  // and a pentatonic melody of glassy plucks that wanders a step or two at a time, through an echo. The busier the map
+  // (fleets in flight), the more notes. Match videos play this same sound and music: planetwars/tools/aura_sound.py
+  // renders it offline, so change both together (planetwars/tests/test_sound.py compares them).
   let musicOn = true, bus = null, echoIn = null, padFilter = null, musicNext = 0, beat = 0, mel = 3;
   try { musicOn = localStorage.getItem('pw-music') !== 'off'; } catch (e) { /* storage blocked: music on */ }
   const BEAT = 0.75, BEATS_PER_CHORD = 8;
