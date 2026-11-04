@@ -91,6 +91,14 @@
         <option value="greedy">Easy: their greedy sample agent</option>
       </select>
     </label>
+    <label><span class="t">Your advantage</span>
+      <select id="adv">
+        <option value="0">Even start</option>
+        <option value="1">2× starting ships</option>
+        <option value="2">2× ships + your side's neutrals</option>
+        <option value="3">3× ships + neutrals + agent waits 100 ticks</option>
+      </select>
+    </label>
     <label><span class="t">Map</span>
       <select id="map">
         <option value="0">League map (10 to 30 planets)</option>
@@ -127,7 +135,9 @@
       <p>You are <b style="color: var(--blue)">blue</b>, on the left. Send ships from your planets to take others: a fleet
         that lands with more ships than the planet holds takes it. Planets you own grow ships every tick, bigger ones
         faster. Each planet can have only one fleet in flight at a time.</p>
-      <p>Win by taking every enemy planet, or by having more ships on planets after 2,000 ticks.</p>
+      <p>Win by taking every enemy planet, or by having more ships on planets after 2,000 ticks. Want a head start?
+        <b>Your advantage</b> (top bar) multiplies your starting ships, hands you the neutral planets on your side and can
+        make the agent sit out the first 100 ticks.</p>
       <p><b>Controls.</b> Click one of your planets, then click where to send (any planet, your own included). Drag from
         a planet works too. <kbd>Shift</kbd>-click or <kbd>A</kbd> picks several. <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd>
         <kbd>4</kbd> send a quarter, half, three quarters or all. <kbd>Space</kbd> pauses, and you can still give orders
@@ -172,7 +182,7 @@
   // ---- settings, from the address so a map can be shared
   const q = new URLSearchParams(location.search);
   const pick = (sel, v) => { if (v !== null && [...sel.options].some(o => o.value === v)) sel.value = v; };
-  pick($('opp'), q.get('opp')); pick($('map'), q.get('planets')); pick($('speed'), q.get('speed'));
+  pick($('opp'), q.get('opp')); pick($('adv'), q.get('adv')); pick($('map'), q.get('planets')); pick($('speed'), q.get('speed'));
   let seed = parseInt(q.get('seed'), 10);
   if (!Number.isFinite(seed)) seed = Math.floor(Math.random() * 1e9);
 
@@ -203,8 +213,22 @@
       $('start').textContent = 'Could not load the agent'; console.error(m.message);
     }
   };
+  // a head start for the human: ships on their starting planets multiplied, the neutrals on their half handed to
+  // them, and the agent sitting out the first ticks
+  const ADV = [{ mult: 1, neutrals: false, wait: 0 }, { mult: 2, neutrals: false, wait: 0 },
+               { mult: 2, neutrals: true, wait: 0 }, { mult: 3, neutrals: true, wait: 100 }];
+  const adv = () => ADV[parseInt($('adv').value, 10) || 0];
+  function applyAdvantage(state) {
+    const a = adv();
+    for (const p of state.planets) {
+      if (p.owner === HUMAN) p.ships *= a.mult;
+      else if (a.neutrals && p.owner === 0 && p.x < PW.WIDTH / 2) p.owner = HUMAN;
+    }
+  }
+
   function askAgent() {
     agentReady = false; agentAction = null; waitingSince = performance.now();
+    if (st.tick < adv().wait) { agentReady = true; return; }  // still sitting out its head start
     if (workerReady) worker.postMessage({ type: 'act', game, state: st, me: AI, budgetMs: budgetMs() });
   }
 
@@ -212,6 +236,7 @@
     if (!keepSeed) seed = Math.floor(Math.random() * 1e9);
     const planets = parseInt($('map').value, 10) || 0;
     st = PW.newGame(seed, planets);
+    applyAdvantage(st);
     game++; over = false; queue = []; selected.clear(); drag = null; agentInfo = null; agentMs = 0;
     worker.postMessage({ type: 'new', kind: $('opp').value });
     askAgent();
@@ -221,6 +246,7 @@
     $('oppdesc').textContent = OPP_TEXT[$('opp').value];
     const url = new URL(location.href);
     url.searchParams.set('seed', seed); url.searchParams.set('opp', $('opp').value);
+    if ($('adv').value !== '0') url.searchParams.set('adv', $('adv').value); else url.searchParams.delete('adv');
     if (planets) url.searchParams.set('planets', planets); else url.searchParams.delete('planets');
     url.searchParams.set('speed', $('speed').value);
     history.replaceState(null, '', url);
@@ -263,7 +289,8 @@
     $('end-title').style.color = winner === HUMAN ? 'var(--blue)' : winner === AI ? 'var(--red)' : 'var(--text)';
     const how = !h || !a ? (!h ? 'with all your planets taken' : 'with every enemy planet taken') : `on ships after ${st.maxTicks} ticks`;
     $('end-text').textContent = `${winner === 0 ? 'Even' : 'Decided'} ${how}, at tick ${st.tick}. Ships on planets: you ${hs}, agent ${as}. ` +
-      `Opponent: ${$('opp').selectedOptions[0].textContent}.`;
+      `Opponent: ${$('opp').selectedOptions[0].textContent}` +
+      ($('adv').value !== '0' ? `, with your advantage: ${$('adv').selectedOptions[0].textContent}.` : '.');
     $('end').hidden = false;
     updateHud();
     if (winner === HUMAN) arpeggio([0, 2, 4, 5, 7, 9, 10], 0.1, 0.09, 0.5);
@@ -438,6 +465,7 @@
   $('again').onclick = () => newGame(true);
   $('another').onclick = () => newGame(false);
   $('opp').onchange = () => newGame(true);
+  $('adv').onchange = () => newGame(true);
   $('map').onchange = () => newGame(false);
   $('speed').onchange = () => { const url = new URL(location.href); url.searchParams.set('speed', $('speed').value); history.replaceState(null, '', url); };
   $('start').onclick = () => { started = true; $('intro').hidden = true; lastStep = performance.now(); initAudio(); };
@@ -579,6 +607,7 @@
     const kind = $('opp').value;
     let t = '';
     if (!workerReady) t = 'Loading the agent…';
+    else if (st && st.tick < adv().wait) t = `Agent waits until tick ${adv().wait}`;
     else if (kind === 'entry' && agentInfo && agentInfo.launches) {
       t = `Agent: ${Math.round(agentMs)} ms, re-ranked ${agentInfo.ranked} of ${agentInfo.launches} launches` +
         (agentInfo.looked ? `, looked ahead on ${agentInfo.looked}` : '') + (agentInfo.pair ? ', two-planet capture' : '');
