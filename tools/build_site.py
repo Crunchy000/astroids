@@ -1,10 +1,10 @@
-"""Build the static site: the browser game, the video gallery and the docs.
+"""Build the static site: the browser game, the video gallery, Planet Wars against our entry and the docs.
 
     pip install markdown
     python tools/build_site.py --out public
 
-The game (index.html), the gallery (videos.html) and results/ are copied unchanged, apart from one
-"Docs" link in the gallery's menu. The READMEs become pages under docs/, with their relative links
+The game (index.html), the gallery (videos.html), results/ and the Planet Wars game (planetwars/play/) are copied
+unchanged, apart from one "Docs" link in the gallery's menu. The READMEs become pages under docs/, with their relative links
 rewritten so they work on the site (links to code point at the repository instead).
 """
 import argparse
@@ -28,6 +28,7 @@ DOCS = [
     ("planetwars/colab/README.md", "planetwars-colab", "Planet Wars on a Colab GPU", "Training the Planet Wars entry on a GPU runtime."),
 ]
 MEDIA_EXT = {".mp4", ".png", ".jpg", ".json"}
+PLAY = ["index.html", "pw.js", "worker.js", "net.wasm", "value.bin", "value.json"]  # planetwars/play/, served as is
 
 CSS = """
 :root { --bg:#05060a; --panel:#0d0f16; --line:#1d212c; --text:#e6e7ea; --text-2:#9aa0ac;
@@ -146,6 +147,7 @@ def index_page():
 game, the write-ups of how the agents are trained, and videos of the matches.</p>
 <div class="cards">{cards}
 <a class="card" href="../videos.html"><b>Match videos</b>Trained teams against the bots and each other, 1280×720.</a>
+<a class="card" href="../planetwars/play/"><b>Play Planet Wars against our entry</b>In the browser, with the planner and its value network running locally.</a>
 </div>
 <h2>Planet Wars: our model against their greedy agent</h2>
 <figure>
@@ -178,6 +180,9 @@ def main():
     assert "</nav>" in gallery
     (out / "videos.html").write_text(gallery.replace("</nav>", '<a href="docs/">Docs</a></nav>', 1))
     (out / ".nojekyll").touch()
+    (out / "planetwars/play").mkdir(parents=True)
+    for f in PLAY:
+        shutil.copy(ROOT / "planetwars/play" / f, out / "planetwars/play" / f)
 
     pages = {f: name for f, name, _, _ in DOCS}
     for md_file, name, _, _ in DOCS:
