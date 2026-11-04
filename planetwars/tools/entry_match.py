@@ -20,6 +20,8 @@ import sys
 import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "entry"))
+for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):  # one core per game: no thread pile-ups
+    os.environ.setdefault(_v, "1")
 
 
 def parse(spec):
