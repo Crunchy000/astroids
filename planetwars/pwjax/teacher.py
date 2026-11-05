@@ -261,6 +261,119 @@ def cmd_gen(cfg):
             np.savez(os.path.join(cfg.out, f"{name}.npz"), **{k: np.concatenate([p[k] for p in parts]) for k in parts[0]})
 
 
+def cmd_record(cfg):
+    """Like `gen`, but only positions with a choice in them, and in two passes. First the entry plays `--envs` games
+    against itself and every `stride` ticks the game is kept if a side can launch (that side is judged; if both can,
+    one at random); then the teacher judges the kept positions `--judge-batch` at a time. In `gen` about two judged
+    positions in three had nothing to launch, and all of them cost as much to judge."""
+    os.makedirs(cfg.out, exist_ok=True)
+    params, heads = evaluate.load(cfg.value)
+    params = {k: v for k, v in params.items() if not k.startswith("aux.")}
+    bank_np = maps.make_bank(cfg.maps, seed=cfg.seed, param_fn=maps.cog2026_params)
+    np.savez(os.path.join(cfg.out, "maps.npz"), **bank_np)
+    bank = {k: jnp.asarray(v) for k, v in bank_np.items()}
+    play = entry_agent(params, heads, cfg.play_top)
+    _, judge = make_teacher(params, heads, cfg.top, cfg.ours, 4, 0.5, cfg.ticks, cfg.roll, cfg.extra, cfg.blend)
+    n, jb = cfg.envs, cfg.judge_batch
+    v_play = jax.vmap(play)
+    v_judge = jax.jit(jax.vmap(judge))
+    blocks = max(cfg.chunk // cfg.stride, 1)
+
+    def can_launch(s, p):
+        return jnp.any(s.valid & (s.owner == p) & ~s.tr_on & (s.ships >= 2.0))
+
+    @jax.jit
+    def chunk(c, eps, key):
+        def one(c, k):
+            s, done = c
+            ka, kb, kr = jax.random.split(k, 3)
+            a1 = v_play(s, jnp.ones(n, jnp.int32), jax.random.split(ka, n))
+            a2 = v_play(s, jnp.full(n, 2, jnp.int32), jax.random.split(kb, n))
+            r1, r2 = jax.random.uniform(kr, (2, n)) < eps  # now and then a side waits, so games leave the entry's own path
+            nop = (jnp.full(n, -1, jnp.int32), jnp.full(n, -1, jnp.int32), jnp.zeros(n, s.ships.dtype))
+            a1 = tuple(jnp.where(r1, x, y) for x, y in zip(nop, a1))
+            a2 = tuple(jnp.where(r2, x, y) for x, y in zip(nop, a2))
+            s2 = tree_where(done, s, jax.vmap(env.step)(s, a1, a2))
+            return (s2, done | jax.vmap(env.is_terminal)(s2)), None
+
+        def block(c, k):
+            ks = jax.random.split(k, cfg.stride + 1)
+            c, _ = jax.lax.scan(one, c, ks[:-1])
+            s, done = c
+            d1 = jax.vmap(can_launch, (0, None))(s, 1)
+            d2 = jax.vmap(can_launch, (0, None))(s, 2)
+            coin = jax.random.bernoulli(ks[-1], 0.5, (n,))
+            me = jnp.where(d1 & d2, jnp.where(coin, 1, 2), jnp.where(d1, 1, 2)).astype(jnp.int32)
+            return c, dict(state=s, me=me, keep=(d1 | d2) & ~done)
+
+        return jax.lax.scan(block, c, jax.random.split(key, blocks))
+
+    rng = np.random.default_rng(cfg.seed + 7919 * cfg.game_seed)
+    key = jax.random.PRNGKey(cfg.seed + 7919 * cfg.game_seed)
+    game0 = 0
+    for name, nb in (("val", cfg.val_batches), ("train", cfg.batches)):
+        parts = []
+        for b in range(nb):
+            t0 = time.time()
+            lo, hi = (0, cfg.maps - cfg.val_maps) if name == "train" else (cfg.maps - cfg.val_maps, cfg.maps)
+            ids = rng.integers(lo, hi, size=n)
+            s = jax.vmap(lambda i: env.from_bank(bank, i))(jnp.asarray(ids))
+            c = (s, jax.vmap(env.is_terminal)(s))
+            eps = float(rng.choice([0.0, 0.02, 0.05]))
+            kept = []                                     # (states [m], me [m], env index [m], snapshot number [m])
+            snap = 0
+            for _ in range(-(-cfg.game_ticks // (blocks * cfg.stride))):
+                if bool(c[1].all()):
+                    break
+                key, k = jax.random.split(key)
+                c, rec = chunk(c, eps, k)
+                rec = jax.tree.map(np.asarray, rec)
+                for i in range(rec["keep"].shape[0]):
+                    e = np.nonzero(rec["keep"][i])[0]
+                    if e.size:
+                        kept.append((jax.tree.map(lambda x: x[i][e], rec["state"]), rec["me"][i][e], e, np.full(e.size, snap + i)))
+                snap += rec["keep"].shape[0]
+            played = time.time() - t0
+            lead = np.asarray(jax.vmap(env.leader)(c[0]))
+            z1 = np.where(lead == 1, 1.0, np.where(lead == 2, -1.0, 0.0)).astype(np.float32)
+            states = jax.tree.map(lambda *x: np.concatenate(x), *[k_[0] for k_ in kept])
+            me = np.concatenate([k_[1] for k_ in kept])
+            env_i = np.concatenate([k_[2] for k_ in kept])
+            snaps = np.concatenate([k_[3] for k_ in kept])
+            m = len(me)
+            out = []
+            for j0 in range(0, m, jb):                    # the teacher, `jb` positions at a time (the last one padded)
+                idx = np.minimum(np.arange(j0, j0 + jb), m - 1)
+                key, k = jax.random.split(key)
+                r = v_judge(jax.tree.map(lambda x: jnp.asarray(x[idx]), states), jnp.asarray(me[idx]), jax.random.split(k, jb))
+                r = jax.tree.map(np.asarray, r)
+                take = slice(0, min(jb, m - j0))
+                out.append(dict(owner=r["owner"][take].astype(np.int8), ships=r["ships"][take].astype(np.float32),
+                                q=r["q"][take], qv=r["qv"][take], v0=r["v0"][take], entry=r["entry"][take],
+                                use=r["usable"][take], ended=r["ended"][take], src=r["acts"][0][take].astype(np.int8),
+                                dst=r["acts"][1][take].astype(np.int8), sent=r["acts"][2][take],
+                                tick=(states.tick[idx] + r["h"])[take]))
+            part = {k_: np.concatenate([o[k_] for o in out]) for k_ in out[0]}
+            part.update(owner_now=states.owner.astype(np.int8), ships_now=states.ships.astype(np.float32), now=states.tick,
+                        me=me.astype(np.int32), z=np.where(me == 1, z1[env_i], -z1[env_i]).astype(np.float32),
+                        map=ids[env_i], game=env_i + game0, snap=snaps)
+            keep = part["use"].sum(1) >= 2                # a launch to choose besides waiting
+            part = {k_: v[keep] for k_, v in part.items()}
+            game0 += n
+            parts.append(part)
+            u = part["use"]
+            ent = np.where(np.isfinite(part["entry"]), part["entry"], -np.inf)
+            e_pick, t_pick = np.argmax(ent, 1), np.argmax(np.where(u, part["q"], -np.inf), 1)
+            rows = np.arange(len(e_pick))
+            print(json.dumps(dict(
+                set=name, batch=b + 1, kept=m, positions=int(keep.sum()), options=int(u.sum()),
+                seconds_play=round(played, 1), seconds=round(time.time() - t0, 1), win1=round(float((z1 > 0).mean()), 3),
+                differ=round(float(np.mean(t_pick != e_pick)), 4),
+                q_lost_entry=round(float(np.mean(part["q"][rows, t_pick] - part["q"][rows, e_pick])), 4),
+                corr_result_qv=round(float(np.corrcoef(part["qv"][rows, e_pick], part["z"])[0, 1]), 4))), flush=True)
+            np.savez(os.path.join(cfg.out, f"{name}.npz"), **{k_: np.concatenate([p[k_] for p in parts]) for k_ in parts[0]})
+
+
 # ---------------------------------------------------------------- teaching the entry's network
 
 def cmd_train(cfg):
@@ -345,13 +458,24 @@ def cmd_train(cfg):
         # how often the network (mixed with the hand score) picks the option the play-outs like best
         tot = 0.5 * pred + 0.5 * np.tanh(np.asarray(va_d["hand"]) / 200.0)
         agree = float(np.mean(np.argmax(np.where(u, tot, -np.inf), 1) == np.argmax(np.where(u, va["q"], -np.inf), 1)))
-        return dict(mse=round(mse, 5), agree=round(agree, 4))
+        # as a judge of the look-ahead's options alone (the ones with an entry score): what its pick costs by the
+        # play-outs, against the best of them, where there is a choice; `entry_lost` is the same for the entry's pick
+        la = u & np.isfinite(va["entry"])
+        dec = la.sum(1) >= 2
+        q = np.where(la, va["q"], -np.inf)[dec]
+        rows = np.arange(len(q))
+        pick = np.argmax(np.where(la, tot, -np.inf)[dec], 1)
+        e_pick = np.argmax(np.where(la, va["entry"], -np.inf)[dec], 1)
+        lost = float(np.mean(q.max(1) - q[rows, pick]))
+        return dict(mse=round(mse, 5), agree=round(agree, 4), lost=round(lost, 4),
+                    entry_lost=round(float(np.mean(q.max(1) - q[rows, e_pick])), 4))
 
     os.makedirs(cfg.out, exist_ok=True)
     start = held_out(params)
     print("start:", json.dumps(start), flush=True)
     key, t0 = jax.random.PRNGKey(cfg.seed), time.time()
-    best = start["mse"] if cfg.keep == "mse" else -start["agree"]
+    crit = {"mse": lambda r: r["mse"], "agree": lambda r: -r["agree"], "lost": lambda r: r["lost"]}[cfg.keep]
+    best = crit(start)
     n_chunks = cfg.steps // cfg.chunk_steps
     for c in range(n_chunks):
         lr = cfg.lr + (cfg.lr_end - cfg.lr) * c / max(n_chunks - 1, 1)
@@ -362,7 +486,7 @@ def cmd_train(cfg):
             print(json.dumps(dict(step=(c + 1) * cfg.chunk_steps, loss=round(float(loss), 5), **row,
                                   seconds=round(time.time() - t0))), flush=True)
             save_params(os.path.join(cfg.out, "latest.npz"), params, argparse.Namespace(heads=heads))
-            m = row["mse"] if cfg.keep == "mse" else -row["agree"]
+            m = crit(row)
             if m < best:
                 best = m
                 save_params(os.path.join(cfg.out, "best.npz"), params, argparse.Namespace(heads=heads))
@@ -404,6 +528,22 @@ def main(argv=None):
     g.add_argument("--chunk", type=int, default=160)
     g.add_argument("--game-ticks", type=int, default=2001, help="stop the games after this many ticks (for quick tests)")
     g.add_argument("--game-seed", type=int, default=0, help="other games on the same maps (--seed picks the maps)")
+    r = sub.add_parser("record")
+    r.add_argument("value")
+    teacher_args(r)
+    r.add_argument("--out", required=True)
+    r.add_argument("--extra", type=int, default=0, help="more options played forward, picked at random from the rest")
+    r.add_argument("--play-top", type=int, default=64, help="launches re-ranked by the entry playing the games")
+    r.add_argument("--envs", type=int, default=256, help="games played at once")
+    r.add_argument("--judge-batch", type=int, default=512, help="positions the teacher judges at once")
+    r.add_argument("--batches", type=int, default=4)
+    r.add_argument("--val-batches", type=int, default=1)
+    r.add_argument("--maps", type=int, default=8192)
+    r.add_argument("--val-maps", type=int, default=512)
+    r.add_argument("--stride", type=int, default=10, help="ticks between kept positions of a game")
+    r.add_argument("--chunk", type=int, default=200)
+    r.add_argument("--game-ticks", type=int, default=2001)
+    r.add_argument("--game-seed", type=int, default=0)
     t = sub.add_parser("train")
     t.add_argument("--data", required=True)
     t.add_argument("--extra", default="", help="more recorded directories on the same maps, comma separated")
@@ -411,7 +551,7 @@ def main(argv=None):
     t.add_argument("--out", required=True)
     t.add_argument("--rank", type=float, default=0.0, help="weight of the ranking loss")
     t.add_argument("--rank-temp", type=float, default=10.0)
-    t.add_argument("--keep", choices=("mse", "agree"), default="mse")
+    t.add_argument("--keep", choices=("mse", "agree", "lost"), default="mse")
     t.add_argument("--steps", type=int, default=4000)
     t.add_argument("--chunk-steps", type=int, default=100)
     t.add_argument("--report-every", type=int, default=5)
@@ -421,7 +561,7 @@ def main(argv=None):
     t.add_argument("--seed", type=int, default=0)
     cfg = a.parse_args(argv)
     print("devices:", jax.devices(), flush=True)
-    {"match": cmd_match, "gen": cmd_gen, "train": cmd_train}[cfg.cmd](cfg)
+    {"match": cmd_match, "gen": cmd_gen, "record": cmd_record, "train": cmd_train}[cfg.cmd](cfg)
 
 
 if __name__ == "__main__":
