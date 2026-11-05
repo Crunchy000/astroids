@@ -76,3 +76,29 @@ def test_search_keeps_to_its_deadline():
     took = time.perf_counter() - t0
     assert r is not None and 0 <= r[0] < len(opts) and r[2] >= 1
     assert took < 0.08 + 0.5 * call + 0.03, (took, call)
+
+
+def test_helper_processes_play_the_same_as_one():
+    """Shared out among helper processes, the options are played and valued exactly as in one process."""
+    random.seed(11)
+    params = GameParams(num_planets=16, max_ticks=2000, min_growth_rate=0.05, max_growth_rate=0.2, transporter_speed=3.0,
+                        initial_neutral_ratio=0.3)
+    gs = GameStateFactory(params).create_game()
+    model = ForwardModel(gs, params)
+    agents = {p: planner.PlannerAgent(search="") for p in (Player.Player1, Player.Player2)}
+    for p, a in agents.items():
+        a.prepare_to_play_as(p, params)
+    c = None
+    while c is None or gs.game_tick < 60:  # with something for player 1 to launch
+        model.step({p: agents[p].get_action(gs) for p in agents})
+        s = entry_agent.arrays(gs, params.transporter_speed, params.max_ticks)
+        c = planner.candidates(s, 1, extras=("spare",))
+    params_v, heads = agents[Player.Player1].value
+    order = np.argsort(-c["score"])[:3]
+    opts = [(int(c["ci"][k]), int(c["cj"][k]), float(c["cn"][k])) for k in order] + [None]
+    far = time.perf_counter() + 60
+    one = playout.search(s, 1, params_v, heads, opts, 6, far, procs=1)
+    many = playout.search(s, 1, params_v, heads, opts, 6, far, procs=3)
+    assert one[2] == many[2] == 6
+    np.testing.assert_allclose(one[1], many[1], rtol=1e-6)
+    assert one[0] == many[0]

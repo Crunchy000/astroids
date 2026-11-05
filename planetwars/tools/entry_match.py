@@ -13,6 +13,7 @@ import argparse
 import copy
 import json
 import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import os
 import pathlib
 import random
@@ -95,8 +96,9 @@ def main():
     pts = n = 0
     t0 = time.time()
     f = open(args.out, "a") if args.out else None
-    with mp.get_context("spawn").Pool(args.procs) as pool:
-        for r in pool.imap_unordered(play, jobs):
+    # not mp.Pool: its workers are daemonic and could not start the play-outs' helper processes
+    with ProcessPoolExecutor(args.procs, mp_context=mp.get_context("spawn")) as pool:
+        for r in (fut.result() for fut in as_completed([pool.submit(play, j) for j in jobs])):
             pts, n = pts + r["a_score"], n + 1
             line = json.dumps(dict(a=args.a, b=args.b, seed=args.seed, **r))
             print(line, flush=True)

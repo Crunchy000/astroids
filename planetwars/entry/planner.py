@@ -573,7 +573,7 @@ def totals_of(params, heads, s, me, owners, shipss, hand, tick, mix):
 
 def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=TOP, mix=MIX, budget_ms=BUDGET_MS, extras=(),
                 look=LOOK, look_ms=LOOK_MS, mix_open=MIX_OPEN, judge=None, pairs=PAIRS, out=None, reserved=(), pair_kinds=PAIR_KINDS,
-                search=None, search_ms=SEARCH_MS):
+                search=None, search_ms=SEARCH_MS, search_procs=None):
     """Like `plan`, but the best launches by hand score (and waiting) are re-ranked by the value network, mixed with
     the hand score as (1 - mix) * value + mix * tanh(hand / 200). Launches go through the network eight at a time,
     best hand score first, until `top` have been seen or `budget_ms` (counted from the start of this call) would be
@@ -651,7 +651,7 @@ def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=
         acts = [None if seen_k[p] < 0 else (int(c["ci"][seen_k[p]]), int(c["cj"][seen_k[p]]), float(c["cn"][seen_k[p]]))
                 for p in pick]
         r = playout.search(s, me, params, heads, acts, search[1], started + search_ms / 1000.0, horizon=horizon, mix=mix,
-                           extras=extras, hint=t_cand)
+                           extras=extras, hint=t_cand, procs=search_procs)
         if out is not None:
             out["search"] = None if r is None else r[2]
         if r is not None:
@@ -708,12 +708,14 @@ class PlannerAgent(NeuralAgent):
 
     def __init__(self, horizon=HORIZON, fractions=FRACTIONS, use_policy=USE_POLICY, value=VALUE, top=TOP, mix=MIX, budget_ms=BUDGET_MS, extras=SIZES,
                  look=LOOK, judge=JUDGE, pairs=PAIRS, pair_kinds=PAIR_KINDS, search=SEARCH, search_ms=SEARCH_MS,
-                 search_rank_ms=SEARCH_RANK_MS):
+                 search_rank_ms=SEARCH_RANK_MS, search_procs=None):
         super().__init__()
         self.search = tuple(int(x) for x in str(search).split(":")) if search else None
-        self.search_ms, self.searched = search_ms, []
+        self.search_ms, self.search_procs, self.searched = search_ms, search_procs, []
         if self.search:
             budget_ms = min(budget_ms, search_rank_ms)
+            import playout
+            playout.start(self.search[0], search_procs)  # its helper processes, if there are cores for them
         self.horizon, self.fractions, self.use_policy, self.extras, self.look = horizon, tuple(fractions), use_policy, tuple(extras), look
         self.pairs, self.pair_kinds = pairs, pair_kinds
         self.value, self.top, self.mix, self.budget_ms = None, top, mix, budget_ms
@@ -751,7 +753,8 @@ class PlannerAgent(NeuralAgent):
                     out = {}
                     best = plan_ranked(s, me, *self.value, self.horizon, self.fractions, self.top, self.mix, self.budget_ms, self.extras, self.look,
                                        judge=self.judge, pairs=self.pairs, out=out, reserved=(self.follow[1][0],) if self.follow else (),
-                                       pair_kinds=self.pair_kinds, search=self.search, search_ms=self.search_ms)
+                                       pair_kinds=self.pair_kinds, search=self.search, search_ms=self.search_ms,
+                                       search_procs=self.search_procs)
                     if "follow" in out:
                         self.follow = (game_state.game_tick + out["follow"][0], out["follow"][1], out["follow"][2])
                     if "search" in out:  # ticks the play-outs reached (None: no time), for checking
