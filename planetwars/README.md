@@ -3,8 +3,8 @@
 An entry for Simon Lucas's [Planet Wars RTS](https://simonlucas.github.io/planet-wars-rts/) league.
 The entry served by default is an all-moves planner (`entry/planner.py`) whose best few launches are
 re-ranked by a small network (`entry/value.npz`, a faster copy of one trained on the results of planner games, then
-trained to predict its own later values), checking the opponent's
-best answers to its eight best options before it picks one. Without that
+trained to predict its own later values), then plays its four best options 30 ticks forward, both sides moved by
+the planner, and picks the one that ends up best, all within 150 ms of a move. Without that
 file, or with `PW_VALUE=off`, it ranks launches by a hand-written score alone. A neural network
 trained by self-play on a GPU is also in the repo (`PW_AGENT=neural`); the planner beats it in 57 of 60
 games. The game itself is untouched: we port its rules to JAX so thousands of games run in parallel,
@@ -427,6 +427,63 @@ In the real engine against the entry without it, 1,800 games: 958 to 842 (0.532,
 three series of 600 went 0.527, 0.552 and 0.518). Against EgoCentric on the 180 seeded maps it scored 167, the entry
 without it 168 (the close maps reshuffle, as above). It is on by default (`PW_PAIRS=200`, the tick it stops; 0 turns
 it off). Results in `results/losses/pairs.txt`.
+
+**A slower teacher.** With no time limit, how much stronger can the same pieces play? `pwjax/teacher.py` starts as the
+entry does, then plays each of its best options forward on a copy of the game, both sides moved by the planner (the
+network re-ranking the hand score's 16 best launches, no look-ahead), and values where each one ends up as the entry
+values a projection. It plays the option that ends up best. Against the entry, in JAX, each map from both sides:
+
+| Options played forward | Ticks | Score |
+|---|---:|---:|
+| 8 | 60 | 112 / 128 (0.875) |
+| 4 | 60 | 58 / 64 (0.906) |
+| 8 | 30 | 57 / 64 (0.891) |
+| 4 | 15 | 52 / 64 (0.813) |
+| 2 | 30 | 51 / 64 (0.797) |
+| 2 | 15 | 45 / 64 (0.703) |
+
+How far the options are played matters more than how many. The play-outs need a good planner on both sides: moved by
+the network re-ranking only 4 launches the teacher (8 options, 60 ticks) scored 0.469, by the hand score alone 0.18. Playing forward only
+where a side is down to 5 planets scored 0.578, so the gain is spread over the whole game, not the endings. It is not
+just a better guess at what the entry will do next: against the round 6 network, the entry scored 42 of 64 and the
+teacher (4 options, 30 ticks) 55; against round 5, 44 and 57.
+
+**Teaching the network what the teacher finds (did not help).** `teacher.py record` plays entry games, keeps
+positions where a side has a choice, and has the teacher judge them in batches afterwards (the value each option's
+play-out ends at, for every option played forward). Networks trained from the entry's on 37,000 to 93,000 such
+decisions, to rank the options as the teacher does, gave up 0.148 to 0.155 a decision against the teacher's best
+option (by the teacher's own play-outs) where the entry gives up 0.159, a difference within the noise, and a
+conditional logit on the options' features could not predict the teacher's picks either. What the teacher sees comes
+from playing forward, which a single position does not show, so the search has to run in the entry itself.
+
+**Playing the best options forward (in the entry, default).** `entry/playout.py` is that search in numpy, within the
+move's time. The game is stepped as arrays (`step`, the engine's rules; `tests/test_playout.py` checks it against the
+official engine tick for tick for 400 ticks on three maps). After re-ranking (now stopped 50 ms into the move), the
+best four options by the mixed score, waiting included, are each played forward on a copy of the game, both sides
+moved by the planner re-ranking its 16 best launches, a tick at a time for all four together, and valued as the
+teacher does; the look-ahead is not used. Before every planner call it checks that the call (the slowest so far,
+times 1.25) and valuing the options still fit before 150 ms into the move; if not, the tick in progress is dropped, so
+the options are always compared after the same number of ticks. A move that cannot fit even one tick falls back to the
+mixed score. `PW_SEARCH=K:T` sets the options and ticks (`4:30`, the default; empty turns it off), `PW_SEARCH_MS` the
+deadline and `PW_SEARCH_RANK_MS` when re-ranking stops.
+
+Against the entry without it, each map from both sides (`tools/entry_match.py`, every move timed against 200 ms):
+
+| Play-outs | Where | Score |
+|---|---|---:|
+| 4 options, 30 ticks | Colab (slower cores), 200 games | 144 (0.72) |
+| 2 options, 60 ticks | Colab, same maps | 146 (0.73) |
+| 2 options, 30 ticks | Colab, same maps | 142 (0.71) |
+| 4 options, 15 ticks | Colab, same maps | 131 (0.655) |
+| 4 options, 30 ticks | here (4 cores), 80 games on other maps | 62 (0.775) |
+
+The standard error is about 0.035 on 200 games, so the settings at 30 ticks or more are alike; 4:30 is the default.
+Against a third opponent, the round 6 entry (round 6 network re-ranking 64 launches, with look-ahead), on 200 Colab
+games: the searching entry scored 160 (0.80), the entry without it 121 (0.605). No move took over 200 ms in any of
+these (a first version that checked the time once a tick took up to 1.3 s). A move takes about 45 ms on average on
+Colab (the entry without it 6 to 9 ms), and a game's average goes up to 120 ms on the biggest maps. Served over the
+league's WebSocket protocol (`main.py`'s server, timed from the client as their runner times it; their Kotlin runner
+was not run for this), 20 games on 12- to 30-planet maps: slowest move 158 ms, none over 200, and it won 17.
 
 The earlier value network in "A value function trained on game results (did not help)" below was asked a
 different question, which of the policy's own moves is worth most, and the policy's moves were not where

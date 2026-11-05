@@ -65,7 +65,7 @@ def main():
     ap.add_argument("--every", type=int, default=40)
     args = ap.parse_args()
 
-    agent = planner.PlannerAgent()  # the entry as served (value.npz in single precision)
+    agent = planner.PlannerAgent(search="")  # the entry as served (value.npz in single precision), without play-outs as pw.js
     vparams, vheads = agent.value
     out = dict(engine=[], positions=[], agent=[])
     for g in range(args.games):
@@ -112,7 +112,7 @@ def main():
         start = state_json(gs, params)
         model = ForwardModel(gs, params)
         me = 1 + g % 2
-        entry = planner.PlannerAgent(budget_ms=1e9)
+        entry = planner.PlannerAgent(budget_ms=1e9, search="")
         entry.prepare_to_play_as(PLAYERS[me], params)
         greedy = GreedyHeuristicAgent()
         greedy.prepare_to_play_as(PLAYERS[3 - me], params)

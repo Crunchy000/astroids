@@ -1,6 +1,8 @@
 """A planner that tries every launch: project each one forward with nobody else acting, keep the best.
-(With a value network on disk, the best few by this score are re-ranked by it, looking one opponent reply ahead; see
-`plan_ranked`. In the first 200 ticks it also tries two of its planets taking a neutral together; see `pair_launches`.)
+(With a value network on disk, the best few by this score are re-ranked by it, and the best four are then played 30
+ticks forward, both sides moved by the planner, for as long as the move's time allows; see `plan_ranked` and
+`playout.search`. In the first 200 ticks it also tries two of its planets taking a neutral together; see
+`pair_launches`.)
 
 Each tick every (source, target, amount) the rules allow is scored by where the game stands `HORIZON` ticks
 later if nothing else is launched by either side. With no new launches, every planet's future depends only on
@@ -41,7 +43,7 @@ PAIRS = int(os.environ.get("PW_PAIRS", "200"))   # before this tick, also try tw
 PAIR_KINDS = os.environ.get("PW_PAIR_KINDS", "n")  # two-planet launches at: n neutrals (before PAIRS), e enemy planets, d ours about to fall; b: the second planet may be busy now
 PAIR_MOST = 16                                  # most such pairs scored by the network
 PAIR_WAIT = 30                                  # most ticks the second planet of a pair holds its ships for its launch
-SEARCH = os.environ.get("PW_SEARCH", "")        # 'K:T': play the best K options T ticks forward (see playout.search); empty: off
+SEARCH = os.environ.get("PW_SEARCH", "4:30")    # 'K:T': play the best K options T ticks forward (see playout.search); empty: off
 SEARCH_MS = float(os.environ.get("PW_SEARCH_MS", "150"))      # play-outs stop this many ms into the move
 SEARCH_RANK_MS = float(os.environ.get("PW_SEARCH_RANK_MS", "50"))  # with play-outs, re-ranking stops this many ms in
 
