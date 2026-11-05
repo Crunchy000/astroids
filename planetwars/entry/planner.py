@@ -46,6 +46,9 @@ PAIR_WAIT = 30                                  # most ticks the second planet o
 SEARCH = os.environ.get("PW_SEARCH", "4:30")    # 'K:T': play the best K options T ticks forward (see playout.search); empty: off
 SEARCH_MS = float(os.environ.get("PW_SEARCH_MS", "150"))      # play-outs stop this many ms into the move
 SEARCH_RANK_MS = float(os.environ.get("PW_SEARCH_RANK_MS", "50"))  # with play-outs, re-ranking stops this many ms in
+TUNE = os.environ.get("PW_TUNE", "")             # fine-tune fleet sizes (see `tune_sizes`): 'pick' the launch played,
+                                                 # 'opts' every option played forward; empty: off
+TUNE_SIZES = 12                                  # sizes tried from 1 ship to all the source holds, evenly spaced
 
 
 def arrival_step(dist, radius, speed):
@@ -558,7 +561,8 @@ def value_many(params, heads, s, me, owners, shipss, tick):
     """`value_of` for several positions of the same game at once (one batched pass through the network)."""
     planet, glob = still_features(s, me, owners, shipss, tick, next(iter(params.values())).dtype)
     valid = np.broadcast_to(s.valid, (len(owners), s.valid.shape[0]))
-    return pwnet.value_fast(pwnet.prepare(params, heads), planet, glob, valid)
+    dist = pwnet.dist_features(np, s.pos, s.speed) if pwnet.has_dist(params) else None
+    return pwnet.value_fast(pwnet.prepare(params, heads), planet, glob, valid, dist)
 
 
 def totals_of(params, heads, s, me, owners, shipss, hand, tick, mix):
@@ -571,9 +575,48 @@ def totals_of(params, heads, s, me, owners, shipss, hand, tick, mix):
             + np.where(won & ~lost, 10.0, 0.0) - np.where(lost & ~won, 10.0, 0.0))
 
 
+def tune_sizes(s, me, c, ks, params, heads, mix, sizes=TUNE_SIZES):
+    """The best whole number of ships for each of the launches `ks` (indices into `c`, which needs `keep`), keeping its
+    source and target: `sizes` sizes evenly spaced from 1 to all the source holds, just enough to take the target when
+    the fleet lands (as projected) and that with margins of 20% and 3 ships, and the launch's own size, each projected
+    and ranked as `plan_ranked` ranks launches. Returns [(ships, score)], the launch's own size where nothing beats it."""
+    if not ks:
+        return []
+    h, n = c["horizon"], s.ships.shape[0]
+    a1, a2, po, ps, d = c["a1"], c["a2"], c["po"], c["ps"], c["d"]
+    ci, cj, cn, owner_of = [], [], [], []
+    for k in ks:
+        i, j, x0 = int(c["ci"][k]), int(c["cj"][k]), float(c["cn"][k])
+        most = float(np.floor(s.ships[i]))
+        grid = [x0] + list(np.round(np.linspace(1.0, most, sizes)))
+        kk = int(arrival_step(d[i, j], s.radius[j], s.speed))
+        if kk < h and po[kk, j] != me:
+            mine_in, opp_in = (a1 if me == 1 else a2)[kk, j], (a2 if me == 1 else a1)[kk, j]
+            need = ps[kk, j] + (s.growth[j] if po[kk, j] != 0 else 0.0) + opp_in - mine_in
+            cap = np.floor(max(need, 0.0)) + 1.0
+            grid += [cap, np.floor(cap * 1.2) + 1.0, cap + 3.0]
+        xs = []
+        for x in grid:
+            if 1.0 <= x <= most and x not in xs:
+                xs.append(float(x))
+        ci += [i] * len(xs)
+        cj += [j] * len(xs)
+        cn += xs
+        owner_of.append(len(xs))
+    ci, cj, cn = np.array(ci), np.array(cj), np.array(cn)
+    own, sh = project(s, me, h, ci, cj, cn, a1, a2, po, ps, c["base_owner"], c["base_ships"], d)
+    tot = totals_of(params, heads, s, me, own, sh, score(own, sh, s, me, c["near"]), s.tick + h, mix)
+    out, lo = [], 0
+    for m in owner_of:
+        b = lo + int(np.argmax(tot[lo:lo + m]))  # the launch's own size first, so it stays on a tie
+        out.append((float(cn[b]), float(tot[b])))
+        lo += m
+    return out
+
+
 def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=TOP, mix=MIX, budget_ms=BUDGET_MS, extras=(),
                 look=LOOK, look_ms=LOOK_MS, mix_open=MIX_OPEN, judge=None, pairs=PAIRS, out=None, reserved=(), pair_kinds=PAIR_KINDS,
-                search=None, search_ms=SEARCH_MS, search_procs=None):
+                search=None, search_ms=SEARCH_MS, search_procs=None, tune=""):
     """Like `plan`, but the best launches by hand score (and waiting) are re-ranked by the value network, mixed with
     the hand score as (1 - mix) * value + mix * tanh(hand / 200). Launches go through the network eight at a time,
     best hand score first, until `top` have been seen or `budget_ms` (counted from the start of this call) would be
@@ -602,8 +645,8 @@ def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=
     tail = look.split(":")[-1].lstrip("0123456789") if look else ""
     focus, distinct = "f" in tail, "d" in tail
     ratio, per_opt = (judge[2], n_rep + 1) if judge is not None else (1.0, n_rep)  # look-ahead cost per option, in positions
-    c = candidates(s, me, horizon, fractions, None, extras, keep=ours > 0 or s.tick < pairs or bool(pair_kinds.replace("n", "")),
-                   reserved=reserved)
+    c = candidates(s, me, horizon, fractions, None, extras,
+                   keep=ours > 0 or s.tick < pairs or bool(pair_kinds.replace("n", "")) or bool(tune), reserved=reserved)
     if c is None:
         return None
     t_cand = time.perf_counter() - started
@@ -650,12 +693,18 @@ def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=
         pick = np.argsort(-seen_t, kind="stable")[:search[0]]
         acts = [None if seen_k[p] < 0 else (int(c["ci"][seen_k[p]]), int(c["cj"][seen_k[p]]), float(c["cn"][seen_k[p]]))
                 for p in pick]
+        if tune == "opts":  # each option played forward at its best size
+            launch = [m for m, a in enumerate(acts) if a is not None]
+            for m, (x, _) in zip(launch, tune_sizes(s, me, c, [int(seen_k[pick[m]]) for m in launch], params, heads, mix)):
+                acts[m] = (acts[m][0], acts[m][1], x)
         r = playout.search(s, me, params, heads, acts, search[1], started + search_ms / 1000.0, horizon=horizon, mix=mix,
                            extras=extras, hint=t_cand, procs=search_procs)
         if out is not None:
             out["search"] = None if r is None else r[2]
         if r is not None:
             best = int(pick[r[0]])
+            if tune == "opts" and acts[r[0]] is not None:
+                return acts[r[0]]
     if ours and took > 0:
         left = budget_ms - (time.perf_counter() - started) * 1000 - look_ms
         ours = min(ours, int(left / (took * ratio / CHUNK)) // per_opt)
@@ -683,6 +732,8 @@ def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=
     k = int(seen_k[best])
     if k < 0:
         return None
+    if tune == "pick":
+        return int(c["ci"][k]), int(c["cj"][k]), tune_sizes(s, me, c, [k], params, heads, mix)[0][0]
     return int(c["ci"][k]), int(c["cj"][k]), float(c["cn"][k])
 
 
@@ -708,10 +759,10 @@ class PlannerAgent(NeuralAgent):
 
     def __init__(self, horizon=HORIZON, fractions=FRACTIONS, use_policy=USE_POLICY, value=VALUE, top=TOP, mix=MIX, budget_ms=BUDGET_MS, extras=SIZES,
                  look=LOOK, judge=JUDGE, pairs=PAIRS, pair_kinds=PAIR_KINDS, search=SEARCH, search_ms=SEARCH_MS,
-                 search_rank_ms=SEARCH_RANK_MS, search_procs=None):
+                 search_rank_ms=SEARCH_RANK_MS, search_procs=None, tune=TUNE):
         super().__init__()
         self.search = tuple(int(x) for x in str(search).split(":")) if search else None
-        self.search_ms, self.search_procs, self.searched = search_ms, search_procs, []
+        self.search_ms, self.search_procs, self.searched, self.tune = search_ms, search_procs, [], tune
         if self.search:
             budget_ms = min(budget_ms, search_rank_ms)
             import playout
@@ -754,7 +805,7 @@ class PlannerAgent(NeuralAgent):
                     best = plan_ranked(s, me, *self.value, self.horizon, self.fractions, self.top, self.mix, self.budget_ms, self.extras, self.look,
                                        judge=self.judge, pairs=self.pairs, out=out, reserved=(self.follow[1][0],) if self.follow else (),
                                        pair_kinds=self.pair_kinds, search=self.search, search_ms=self.search_ms,
-                                       search_procs=self.search_procs)
+                                       search_procs=self.search_procs, tune=self.tune)
                     if "follow" in out:
                         self.follow = (game_state.game_tick + out["follow"][0], out["follow"][1], out["follow"][2])
                     if "search" in out:  # ticks the play-outs reached (None: no time), for checking

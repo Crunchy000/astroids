@@ -371,6 +371,77 @@ def test_fast_value_matches_value_batch(padded):
     np.testing.assert_allclose(pwnet.value_fast(pwnet.prepare(net, heads), planet, glob, valid), want, rtol=1e-9, atol=1e-9)
 
 
+def _with_dist(net, heads, seed=5):
+    """The network with random travel-time attention weights (as `lvalue train --dist` adds, but not zero)."""
+    import pwnet
+    rng = np.random.default_rng(seed)
+    out = dict(net)
+    for i in range(pwnet.n_layers(net)):
+        out[f"l{i}.ab"] = rng.normal(size=(pwnet.N_DIST_FEATS, heads))
+    return out
+
+
+@pytest.mark.parametrize("padded", [False, True])
+def test_fast_value_with_travel_times_matches_value_batch(padded):
+    """A network whose attention sees travel times: value_fast gives value_batch's numbers, and value_only's for one
+    position; zero travel-time weights give the network without them."""
+    import pwnet
+    net, heads = entry_agent.load(str(ENTRY / "value.npz"))
+    net = {k: v.astype(np.float64) for k, v in net.items()}
+    dnet = _with_dist(net, heads)
+    rng = np.random.default_rng(4)
+    n = 17
+    planet = rng.normal(size=(5, n, pwnet.N_PLANET_FEATS))
+    glob = rng.normal(size=(5, pwnet.N_GLOBAL_FEATS))
+    valid = np.ones((5, n), bool)
+    if padded:
+        valid[:, 13:] = False
+        planet[:, 13:] = 0.0
+    dist = pwnet.dist_features(np, rng.uniform(0, 600, size=(n, 2)), 3.0)
+    want = pwnet.value_batch(np, dnet, heads, planet, glob, valid, dist)
+    np.testing.assert_allclose(pwnet.value_fast(pwnet.prepare(dnet, heads), planet, glob, valid, dist), want,
+                               rtol=1e-9, atol=1e-9)
+    np.testing.assert_allclose(pwnet.value_only(np, dnet, heads, planet[0], glob[0], valid[0], dist), want[0],
+                               rtol=1e-9, atol=1e-9)
+    assert not np.allclose(want, pwnet.value_batch(np, net, heads, planet, glob, valid), atol=1e-3)
+    znet = {**dnet, **{k: np.zeros_like(v) for k, v in dnet.items() if k.endswith(".ab")}}
+    np.testing.assert_allclose(pwnet.value_batch(np, znet, heads, planet, glob, valid, dist),
+                               pwnet.value_batch(np, net, heads, planet, glob, valid), rtol=1e-12, atol=1e-12)
+
+
+def test_entry_value_with_travel_times_matches_jax():
+    """The entry's batched value (planner.value_many) of a network with travel-time attention matches the JAX
+    network as training sees it (policy.apply on the same position)."""
+    import types
+    import jax
+    jax.config.update("jax_enable_x64", True)
+    import jax.numpy as jnp
+    from pwjax import policy
+    random.seed(9)
+    params = GameParams(num_planets=20, max_ticks=600)
+    gs = GameStateFactory(params).create_game()
+    model = ForwardModel(gs, params)
+    bots = {p: GreedyHeuristicAgent() for p in (Player.Player1, Player.Player2)}
+    for p, a in bots.items():
+        a.prepare_to_play_as(p, params)
+    for _ in range(120):
+        model.step({p: bots[p].get_action(gs) for p in bots})
+    net, heads = entry_agent.load(str(ENTRY / "value.npz"))
+    net = _with_dist({k: v.astype(np.float64) for k, v in net.items()}, heads)
+    s = entry_agent.arrays(gs, params.transporter_speed, params.max_ticks)
+    jnet = {k: jnp.asarray(v) for k, v in net.items()}
+    for me in (1, 2):
+        c = planner.candidates(s, me, 90, planner.FRACTIONS, None, ("spare",))
+        owners, shipss = list(c["owner"][:6]) + [c["base_owner"]], list(c["ships"][:6]) + [c["base_ships"]]
+        fast = planner.value_many(net, heads, s, me, owners, shipss, s.tick + 90)
+        for k, (o, sh) in enumerate(zip(owners, shipss)):
+            s2 = types.SimpleNamespace(**{**vars(s), "owner": o, "ships": sh, "tr_on": np.zeros_like(s.tr_on),
+                                          "tick": float(s.tick + 90)})
+            js = types.SimpleNamespace(**{k2: (jnp.asarray(v) if isinstance(v, np.ndarray) else v) for k2, v in vars(s2).items()})
+            want = float(policy.apply(jnet, heads, js, me)[2])
+            np.testing.assert_allclose(fast[k], want, rtol=1e-7, atol=1e-7)
+
+
 def test_pair_launches_match_the_engine():
     """Two planets taking a neutral together (`pair_launches`): the engine, stepping the first launch now and the second
     `wait` ticks later with nobody else acting, ends with every planet as projected."""
@@ -455,3 +526,26 @@ def test_pair_attacks_and_rescues_match_the_engine():
         if min(checked.values()) >= 10:
             break
     assert checked["e"] >= 5 and checked["d"] >= 5, checked
+
+
+def test_tuned_sizes_score_at_least_the_launch_itself():
+    """`tune_sizes` keeps a launch's source and target and returns a size the source holds that the ranking scores at
+    least as well as the launch's own size."""
+    random.seed(12)
+    params = GameParams(num_planets=18, max_ticks=600)
+    gs = GameStateFactory(params).create_game()
+    model = ForwardModel(gs, params)
+    bots = {p: GreedyHeuristicAgent() for p in (Player.Player1, Player.Player2)}
+    for p, a in bots.items():
+        a.prepare_to_play_as(p, params)
+    c = None
+    while c is None or gs.game_tick < 80:
+        model.step({p: bots[p].get_action(gs) for p in bots})
+        s = entry_agent.arrays(gs, params.transporter_speed, params.max_ticks)
+        c = planner.candidates(s, 1, 90, planner.FRACTIONS, None, ("spare",), keep=True)
+    net, heads = entry_agent.load(str(ENTRY / "value.npz"))
+    ks = list(np.argsort(-c["score"])[:5])
+    own = planner.totals_of(net, heads, s, 1, c["owner"][ks], c["ships"][ks], c["score"][ks], s.tick + c["horizon"], 0.5)
+    for k, (x, tot), o in zip(ks, planner.tune_sizes(s, 1, c, ks, net, heads, 0.5), own):
+        assert 1.0 <= x <= np.floor(s.ships[c["ci"][k]]) and x == int(x)
+        assert tot >= o - 1e-5

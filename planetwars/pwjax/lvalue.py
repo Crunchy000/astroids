@@ -382,8 +382,9 @@ def make_values(bank, heads, aux=False):
         s = fresh(env.from_bank(bank, i), owner, ships, tick)
         if not aux:
             return policy.apply(params, heads, s, me)[2]
-        planet, glob, _, _ = pwnet.features(jnp, s, me)
-        _, g = pwnet.trunk(jnp, params, heads, planet, glob, s.valid)
+        planet, glob, pair, _ = pwnet.features(jnp, s, me)
+        _, g = pwnet.trunk(jnp, params, heads, planet, glob, s.valid,
+                           pwnet.dist_from_pair(jnp, pair) if pwnet.has_dist(params) else None)
         hid = jnp.maximum(g @ params["v1.w"] + params["v1.b"], 0.0)
         return (hid @ params["v2.w"] + params["v2.b"])[0], hid @ params["aux.w"] + params["aux.b"]
     return jax.vmap(one, in_axes=(None, 0, 0, 0, 0, 0))
@@ -418,6 +419,9 @@ def cmd_train(cfg):
         val = {k: np.concatenate([val[k], more_v[k]]) for k in keep}
     use_aux = "dense" in train and cfg.aux_weight > 0
     params, heads = evaluate.load(cfg.init)
+    if cfg.dist and not policy.pwnet.has_dist(params):  # attention biased by travel times, starting from no bias at all
+        for i in range(policy.pwnet.n_layers(params)):
+            params[f"l{i}.ab"] = jnp.zeros((policy.pwnet.N_DIST_FEATS, heads))
     n_aux = train["dense"].shape[-1] if use_aux else 0
     if n_aux and "aux.w" not in params:  # extra outputs on the value head, used only while training
         params["aux.w"] = jax.random.normal(jax.random.PRNGKey(cfg.seed + 1), (params["v1.w"].shape[1], n_aux)) * 0.01
@@ -726,6 +730,8 @@ def main(argv=None):
                    help="train towards lambda-returns of the starting network's values along each game instead of the result")
     t.add_argument("--td-value", default="", help="make the lambda-returns with this network's values instead (a bigger network "
                    "can learn a smaller one's)")
+    t.add_argument("--dist", action="store_true", help="give the network's attention the travel times between planets "
+                   "(new weights l{i}.ab, starting at zero, so training starts from the --init network's exact values)")
     t.add_argument("--td-refresh", type=int, default=0, help="recompute the lambda-returns with the network as it is every this many steps")
     t.add_argument("--seed", type=int, default=0)
     m = sub.add_parser("match")

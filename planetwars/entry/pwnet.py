@@ -16,6 +16,7 @@ N_AMOUNTS = len(FRACTIONS) + 2  # plus "just enough to win" and "enough with a m
 N_PLANET_FEATS = 21
 N_GLOBAL_FEATS = 9
 N_PAIR_FEATS = 5
+N_DIST_FEATS = 3  # how far apart two planets are, for networks whose attention sees it (params `l{i}.ab`)
 NEG = -1e9
 
 
@@ -92,6 +93,33 @@ def features(xp, s, me):
                                 "potential": (my_total - opp_total) / (my_total + opp_total + 1.0)}
 
 
+def dist_features(xp, pos, speed):
+    """[N, N, N_DIST_FEATS] travel time between each two planets (eta = distance / fleet speed, in ticks), as
+    eta / 100, log(1 + eta) / 5 and exp(-eta / 25). The same for both players (mirroring keeps distances)."""
+    d = xp.sqrt(xp.sum((pos[:, None, :] - pos[None, :, :]) ** 2, axis=-1))
+    return _dist_of_eta(xp, d / speed)
+
+
+def _dist_of_eta(xp, eta):
+    return xp.stack([eta / 100.0, xp.log1p(eta) / 5.0, xp.exp(-eta / 25.0)], axis=-1)
+
+
+def dist_from_pair(xp, pair):
+    """`dist_features` from `features`' pair features (whose first column is eta / 100)."""
+    return _dist_of_eta(xp, pair[..., 0] * 100.0)
+
+
+def has_dist(params) -> bool:
+    """Whether the network's attention is biased by travel times (`dist_features`)."""
+    return "l0.ab" in params
+
+
+def _att_bias(xp, dist, w):
+    """Per-head attention bias from travel times: dist [N, N, F] or [B, N, N, F], w [F, heads] -> [(B,) heads, N, N]."""
+    b = dist @ w
+    return xp.moveaxis(b, -1, -3)
+
+
 def _ln(xp, x, g, b):
     mu = xp.mean(x, axis=-1, keepdims=True)
     var = xp.mean((x - mu) ** 2, axis=-1, keepdims=True)
@@ -106,8 +134,9 @@ def n_layers(params) -> int:
     return sum(1 for k in params if k.endswith(".wq"))
 
 
-def trunk(xp, params, heads, planet, glob, valid):
-    """The transformer shared by every output: returns (token states [N, d_model], hidden global vector g)."""
+def trunk(xp, params, heads, planet, glob, valid, dist=None):
+    """The transformer shared by every output: returns (token states [N, d_model], hidden global vector g). A network
+    with `l{i}.ab` weights adds to each head's attention scores a bias from the travel times `dist` (`dist_features`)."""
     p = params
     n = planet.shape[0]
     tok = xp.concatenate([planet, xp.broadcast_to(glob[None, :], (n, glob.shape[0]))], axis=-1)
@@ -121,6 +150,8 @@ def trunk(xp, params, heads, planet, glob, valid):
         k = (a @ p[f"l{i}.wk"]).reshape(n, heads, dh)
         v = (a @ p[f"l{i}.wv"]).reshape(n, heads, dh)
         att = xp.einsum("qhd,khd->hqk", q, k) / (dh ** 0.5)
+        if f"l{i}.ab" in p:
+            att = att + _att_bias(xp, dist, p[f"l{i}.ab"])
         att = xp.where(kmask, att, NEG)
         att = xp.exp(att - xp.max(att, axis=-1, keepdims=True))
         att = att / xp.sum(att, axis=-1, keepdims=True)
@@ -135,14 +166,15 @@ def trunk(xp, params, heads, planet, glob, valid):
     return h, g
 
 
-def value_only(xp, params, heads, planet, glob, valid):
+def value_only(xp, params, heads, planet, glob, valid, dist=None):
     """Just the value output (skips the move heads): the cost of ranking a position."""
-    _, g = trunk(xp, params, heads, planet, glob, valid)
+    _, g = trunk(xp, params, heads, planet, glob, valid, dist)
     return (_relu(xp, g @ params["v1.w"] + params["v1.b"]) @ params["v2.w"] + params["v2.b"])[0]
 
 
-def value_batch(xp, params, heads, planet, glob, valid):
-    """`value_only` for B positions at once: planet [B, N, F], glob [B, G], valid [B, N] -> values [B]."""
+def value_batch(xp, params, heads, planet, glob, valid, dist=None):
+    """`value_only` for B positions at once: planet [B, N, F], glob [B, G], valid [B, N] -> values [B]; dist is
+    [N, N, F] (one map) or [B, N, N, F]."""
     p = params
     b, n, _ = planet.shape
     tok = xp.concatenate([planet, xp.broadcast_to(glob[:, None, :], (b, n, glob.shape[-1]))], axis=-1)
@@ -157,6 +189,8 @@ def value_batch(xp, params, heads, planet, glob, valid):
         v = (a @ p[f"l{i}.wv"]).reshape(b, n, heads, dh)
         q, k, v = q.transpose(0, 2, 1, 3), k.transpose(0, 2, 3, 1), v.transpose(0, 2, 1, 3)  # batched matmuls, not einsum:
         att = (q @ k) / (dh ** 0.5)                                                             # several times faster in numpy
+        if f"l{i}.ab" in p:
+            att = att + _att_bias(xp, dist, p[f"l{i}.ab"])
         att = xp.where(kmask, att, NEG)
         att = xp.exp(att - xp.max(att, axis=-1, keepdims=True))
         att = att / xp.sum(att, axis=-1, keepdims=True)
@@ -195,7 +229,7 @@ def prepare(params, heads):
             wqkv=(g1[:, None] * wqkv).astype(dt), bqkv=(b1 @ wqkv).astype(dt),
             wo=p[f"l{i}.wo"], bo=p[f"l{i}.bo"],
             w1=(g2[:, None] * p[f"l{i}.w1"]).astype(dt), b1=(b2 @ p[f"l{i}.w1"] + p[f"l{i}.b1"]).astype(dt),
-            w2=p[f"l{i}.w2"], b2=p[f"l{i}.b2"]))
+            w2=p[f"l{i}.w2"], b2=p[f"l{i}.b2"], ab=p.get(f"l{i}.ab")))
     gw = p["g.w"]
     out.update(w_pool=(p["out.ln.g"][:, None] * gw[:dm]).astype(dt), w_gglob=gw[dm:],
                b_g=(p["out.ln.b"] @ gw[:dm] + p["g.b"]).astype(dt),
@@ -212,10 +246,10 @@ def _norm(x):
     return c
 
 
-def value_fast(prep, planet, glob, valid):
+def value_fast(prep, planet, glob, valid, dist=None):
     """`value_batch` with numpy, from `prepare`d weights: the same numbers (to float rounding), faster. Positions are
     kept as one [B * N, D] matrix so each layer is a single matrix product, and the mask is skipped when every planet
-    is valid (always so in the entry, which never pads)."""
+    is valid (always so in the entry, which never pads). `dist`: [N, N, F] travel times, for networks that use them."""
     b, n, f = planet.shape
     heads = prep["heads"]
     h = (planet.reshape(b * n, f) @ prep["w_planet"]).reshape(b, n, -1)
@@ -230,6 +264,8 @@ def value_fast(prep, planet, glob, valid):
         qkv += L["bqkv"]
         qkv = np.ascontiguousarray(qkv.reshape(b, n, 3, heads, dh).transpose(2, 0, 3, 1, 4))   # [3, B, heads, N, dh]
         att = qkv[0] @ qkv[1].swapaxes(-1, -2)
+        if L["ab"] is not None:
+            att += _att_bias(np, dist, L["ab"]).astype(att.dtype)
         if mask is not None:
             att += mask
         att -= att.max(axis=-1, keepdims=True)
@@ -256,7 +292,7 @@ def forward(xp, params, heads, planet, glob, pair, valid, pair_ok):
     """Return (flat logits [N*N + 1] (last = do nothing), amount logits [N, N, N_AMOUNTS], value)."""
     p = params
     n = planet.shape[0]
-    h, g = trunk(xp, params, heads, planet, glob, valid)
+    h, g = trunk(xp, params, heads, planet, glob, valid, dist_from_pair(xp, pair) if has_dist(params) else None)
     value = (_relu(xp, g @ p["v1.w"] + p["v1.b"]) @ p["v2.w"] + p["v2.b"])[0]
     noop = (_relu(xp, g @ p["n1.w"] + p["n1.b"]) @ p["n2.w"] + p["n2.b"])
     hp = (h @ p["ps.w"])[:, None, :] + (h @ p["pd.w"])[None, :, :] + pair @ p["pp.w"] + p["pp.b"] + (g @ p["pg.w"])
