@@ -202,13 +202,15 @@ def cmd_gen(cfg):
             a2 = tuple(jnp.where(me == 2, x, y) for x, y in zip(mine, other))
             s2 = tree_where(done, s, jax.vmap(env.step)(s, a1, a2))
             rec = dict(owner=r["owner"].astype(jnp.int8), ships=r["ships"], q=r["q"], qv=r["qv"], v0=r["v0"], entry=r["entry"],
-                       use=r["usable"] & ~done[:, None], tick=s.tick + r["h"], now=s.tick, me=me, ended=r["ended"])
+                       use=r["usable"] & ~done[:, None], tick=s.tick + r["h"], now=s.tick, me=me, ended=r["ended"],
+                       src=r["acts"][0].astype(jnp.int8), dst=r["acts"][1].astype(jnp.int8), sent=r["acts"][2],
+                       owner_now=s.owner.astype(jnp.int8), ships_now=s.ships)
             return (s2, done | jax.vmap(env.is_terminal)(s2)), rec
 
         return jax.lax.scan(block, c, jax.random.split(key, cfg.chunk // (cfg.stride + 1)))
 
-    rng = np.random.default_rng(cfg.seed)
-    key = jax.random.PRNGKey(cfg.seed)
+    rng = np.random.default_rng(cfg.seed + 7919 * cfg.game_seed)  # maps from --seed, games from both
+    key = jax.random.PRNGKey(cfg.seed + 7919 * cfg.game_seed)
     game0 = 0
     for name, nb in (("val", cfg.val_batches), ("train", cfg.batches)):
         parts, t0 = [], time.time()
@@ -234,6 +236,8 @@ def cmd_gen(cfg):
             flat = lambda a: a.reshape((snaps * n,) + a.shape[2:])[keep]  # noqa: E731
             part = dict(owner=flat(r["owner"]), ships=flat(r["ships"]).astype(np.float32), q=flat(r["q"]), qv=flat(r["qv"]),
                         v0=flat(r["v0"]), entry=flat(r["entry"]), use=flat(r["use"]), ended=flat(r["ended"]),
+                        src=flat(r["src"]), dst=flat(r["dst"]), sent=flat(r["sent"]),
+                        owner_now=flat(r["owner_now"]), ships_now=flat(r["ships_now"]),
                         tick=flat(r["tick"]), now=flat(r["now"]), me=flat(r["me"]), z=flat(z),
                         map=flat(np.broadcast_to(ids[None], (snaps, n))),
                         game=flat(np.broadcast_to(np.arange(n)[None] + game0, (snaps, n))),
@@ -253,7 +257,8 @@ def cmd_gen(cfg):
                 corr_result_v0=round(float(np.corrcoef(part["v0"][rows, e_pick], part["z"])[0, 1]), 4),
                 corr_result_qv=round(float(np.corrcoef(part["qv"][rows, e_pick], part["z"])[0, 1]), 4),
                 mean_abs_qv_v0=round(float(np.mean(np.abs(part["qv"] - part["v0"])[u])), 4))), flush=True)
-        np.savez(os.path.join(cfg.out, f"{name}.npz"), **{k: np.concatenate([p[k] for p in parts]) for k in parts[0]})
+            # saved after every batch, so a lost runtime keeps what was done
+            np.savez(os.path.join(cfg.out, f"{name}.npz"), **{k: np.concatenate([p[k] for p in parts]) for k in parts[0]})
 
 
 # ---------------------------------------------------------------- teaching the entry's network
@@ -398,6 +403,7 @@ def main(argv=None):
     g.add_argument("--stride", type=int, default=15, help="ticks of plain play between judged ticks")
     g.add_argument("--chunk", type=int, default=160)
     g.add_argument("--game-ticks", type=int, default=2001, help="stop the games after this many ticks (for quick tests)")
+    g.add_argument("--game-seed", type=int, default=0, help="other games on the same maps (--seed picks the maps)")
     t = sub.add_parser("train")
     t.add_argument("--data", required=True)
     t.add_argument("--extra", default="", help="more recorded directories on the same maps, comma separated")
