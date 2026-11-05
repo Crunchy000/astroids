@@ -60,7 +60,7 @@ def end_value(params, heads, s, done, me, horizon=90, mix=0.5):
 
 
 def make_teacher(params, heads, top=128, ours=8, replies=4, mix=0.5, ticks=60, roll="value:16", extra=0, blend=0.0,
-                 sources=12, horizon=90, extras=("spare",)):
+                 sources=12, horizon=90, extras=("spare",), gate=""):
     """Returns (act, judge).
 
     judge(s, me, key) -> dict: the entry's `ours` best options (its look-ahead's choice set), plus `extra` more of the
@@ -68,7 +68,8 @@ def make_teacher(params, heads, top=128, ours=8, replies=4, mix=0.5, ticks=60, r
     entry's network sees (owner, ships [K, N], at tick s.tick + h), the entry's own score of it (`entry`, -inf where
     unusable, only for the look-ahead's options), the network's value of that projection (`v0`), and what the play-out
     makes of it (`q`, a total as the entry ranks, and `qv`, the network's value at the end or the result).
-    act(s, me, key) -> the action whose play-out ends best (plus `blend` times the entry's own score)."""
+    act(s, me, key) -> the action whose play-out ends best (plus `blend` times the entry's own score). With `gate`
+    'opp:N' only where the opponent holds N planets or fewer ('min:N': either side), elsewhere the entry's own pick."""
     plan = jplanner.make_planner(sources, horizon, top, jplanner.FRACTIONS, extras)
     plan_r = jplanner.make_planner(sources, horizon, replies, jplanner.FRACTIONS, extras)
     roll_fn = make_roll(roll, params, heads, sources, horizon)
@@ -119,6 +120,11 @@ def make_teacher(params, heads, top=128, ours=8, replies=4, mix=0.5, ticks=60, r
         score = r["q"] + blend * jnp.where(jnp.isfinite(r["entry"]), r["entry"], 0.0)
         score = jnp.where(r["usable"], score, -jnp.inf)
         k = jnp.argmax(score)
+        if gate:
+            kind, most = gate.split(":")
+            held = lambda p: jnp.sum(s.valid & (s.owner == p))  # noqa: E731
+            few = held(3 - me) if kind == "opp" else jnp.minimum(held(me), held(3 - me))
+            k = jnp.where(few <= int(most), k, jnp.argmax(jnp.where(jnp.isfinite(r["entry"]), r["entry"], -jnp.inf)))
         return tuple(x[k] for x in r["acts"])
 
     return act, judge
@@ -136,7 +142,7 @@ def cmd_match(cfg):
     params, heads = evaluate.load(cfg.value)
     params = {k: v for k, v in params.items() if not k.startswith("aux.")}
     bank = {k: jnp.asarray(v) for k, v in maps.make_bank(cfg.games, seed=cfg.seed, param_fn=maps.cog2026_params).items()}
-    act, _ = make_teacher(params, heads, cfg.top, cfg.ours, 4, 0.5, cfg.ticks, cfg.roll, 0, cfg.blend)
+    act, _ = make_teacher(params, heads, cfg.top, cfg.ours, 4, 0.5, cfg.ticks, cfg.roll, 0, cfg.blend, gate=cfg.gate)
     for opp in cfg.vs.split(","):
         if opp == "entry":
             fb = entry_agent(params, heads, cfg.top)
@@ -146,7 +152,7 @@ def cmd_match(cfg):
         t0 = time.time()
         sc, ticks = play_chunked(act, fb, bank, jax.random.PRNGKey(cfg.seed), cfg.chunk, cfg.max_steps)
         sc = np.asarray(sc)
-        print(json.dumps(dict(agent="teacher", value=cfg.value, ours=cfg.ours, ticks=cfg.ticks, roll=cfg.roll, blend=cfg.blend,
+        print(json.dumps(dict(agent="teacher", value=cfg.value, ours=cfg.ours, ticks=cfg.ticks, roll=cfg.roll, blend=cfg.blend, gate=cfg.gate,
                               top=cfg.top, vs=opp, games=len(sc), score=round(float(sc.mean()), 4), wins=int((sc == 1).sum()),
                               draws=int((sc == 0.5).sum()), losses=int((sc == 0).sum()),
                               mean_ticks=round(float(np.asarray(ticks).mean()), 1), seconds=round(time.time() - t0, 1))),
@@ -512,6 +518,8 @@ def main(argv=None):
     m.add_argument("--vs", default="entry", help="entry, or opponents as lvalue.opponent names them (comma separated)")
     m.add_argument("--chunk", type=int, default=50)
     m.add_argument("--max-steps", type=int, default=2001)
+    m.add_argument("--gate", default="", help="opp:N: play forward only where the opponent holds N planets or fewer "
+                                              "(min:N: either side); elsewhere the entry's pick")
     g = sub.add_parser("gen")
     g.add_argument("value")
     teacher_args(g)
