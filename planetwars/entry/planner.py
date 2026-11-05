@@ -41,6 +41,9 @@ PAIRS = int(os.environ.get("PW_PAIRS", "200"))   # before this tick, also try tw
 PAIR_KINDS = os.environ.get("PW_PAIR_KINDS", "n")  # two-planet launches at: n neutrals (before PAIRS), e enemy planets, d ours about to fall; b: the second planet may be busy now
 PAIR_MOST = 16                                  # most such pairs scored by the network
 PAIR_WAIT = 30                                  # most ticks the second planet of a pair holds its ships for its launch
+SEARCH = os.environ.get("PW_SEARCH", "")        # 'K:T': play the best K options T ticks forward (see playout.search); empty: off
+SEARCH_MS = float(os.environ.get("PW_SEARCH_MS", "150"))      # play-outs stop this many ms into the move
+SEARCH_RANK_MS = float(os.environ.get("PW_SEARCH_RANK_MS", "50"))  # with play-outs, re-ranking stops this many ms in
 
 
 def arrival_step(dist, radius, speed):
@@ -567,7 +570,8 @@ def totals_of(params, heads, s, me, owners, shipss, hand, tick, mix):
 
 
 def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=TOP, mix=MIX, budget_ms=BUDGET_MS, extras=(),
-                look=LOOK, look_ms=LOOK_MS, mix_open=MIX_OPEN, judge=None, pairs=PAIRS, out=None, reserved=(), pair_kinds=PAIR_KINDS):
+                look=LOOK, look_ms=LOOK_MS, mix_open=MIX_OPEN, judge=None, pairs=PAIRS, out=None, reserved=(), pair_kinds=PAIR_KINDS,
+                search=None, search_ms=SEARCH_MS):
     """Like `plan`, but the best launches by hand score (and waiting) are re-ranked by the value network, mixed with
     the hand score as (1 - mix) * value + mix * tanh(hand / 200). Launches go through the network eight at a time,
     best hand score first, until `top` have been seen or `budget_ms` (counted from the start of this call) would be
@@ -583,8 +587,13 @@ def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=
 
     With `judge` (params, heads, its time per position over the network's), a second, bigger network scores the
     look-ahead: the chosen options themselves and the positions after the answers, as pwjax.lvalue.make_reply_agent
-    does with `judge`. The time it needs is reserved the same way, scaled by that ratio."""
+    does with `judge`. The time it needs is reserved the same way, scaled by that ratio.
+
+    With `search` = (K, T) the best K options by the mixed score are instead played T ticks forward (see
+    `playout.search`) until `search_ms` into the move, and the one that ends up best is played; `look` is not used."""
     started = time.perf_counter()
+    if search:
+        look = ""
     if mix_open is not None and s.tick < OPEN_TICKS:
         mix = mix_open
     ours, n_rep = (int(x.rstrip("fd")) for x in look.split(":")) if look else (0, 0)
@@ -595,6 +604,7 @@ def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=
                    reserved=reserved)
     if c is None:
         return None
+    t_cand = time.perf_counter() - started
     order = np.argsort(-c["score"], kind="stable")[:top]
     tick = s.tick + c["horizon"]
     # launches that leave the map the same (say, fleets that land after the horizon) are scored once, at the first
@@ -633,6 +643,17 @@ def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=
                 j = int(second[b, 1])
                 out["follow"] = (int(wait[b]), (int(second[b, 0]), j, float(second[b, 2])), int(s.owner[j]))
                 return int(first[b, 0]), int(first[b, 1]), float(first[b, 2])
+    if search and seen_t.size >= 2:
+        import playout
+        pick = np.argsort(-seen_t, kind="stable")[:search[0]]
+        acts = [None if seen_k[p] < 0 else (int(c["ci"][seen_k[p]]), int(c["cj"][seen_k[p]]), float(c["cn"][seen_k[p]]))
+                for p in pick]
+        r = playout.search(s, me, params, heads, acts, search[1], started + search_ms / 1000.0, horizon=horizon, mix=mix,
+                           extras=extras, hint=t_cand)
+        if out is not None:
+            out["search"] = None if r is None else r[2]
+        if r is not None:
+            best = int(pick[r[0]])
     if ours and took > 0:
         left = budget_ms - (time.perf_counter() - started) * 1000 - look_ms
         ours = min(ours, int(left / (took * ratio / CHUNK)) // per_opt)
@@ -684,8 +705,13 @@ class PlannerAgent(NeuralAgent):
     """Tries every launch each tick (see the module docstring)."""
 
     def __init__(self, horizon=HORIZON, fractions=FRACTIONS, use_policy=USE_POLICY, value=VALUE, top=TOP, mix=MIX, budget_ms=BUDGET_MS, extras=SIZES,
-                 look=LOOK, judge=JUDGE, pairs=PAIRS, pair_kinds=PAIR_KINDS):
+                 look=LOOK, judge=JUDGE, pairs=PAIRS, pair_kinds=PAIR_KINDS, search=SEARCH, search_ms=SEARCH_MS,
+                 search_rank_ms=SEARCH_RANK_MS):
         super().__init__()
+        self.search = tuple(int(x) for x in str(search).split(":")) if search else None
+        self.search_ms, self.searched = search_ms, []
+        if self.search:
+            budget_ms = min(budget_ms, search_rank_ms)
         self.horizon, self.fractions, self.use_policy, self.extras, self.look = horizon, tuple(fractions), use_policy, tuple(extras), look
         self.pairs, self.pair_kinds = pairs, pair_kinds
         self.value, self.top, self.mix, self.budget_ms = None, top, mix, budget_ms
@@ -723,9 +749,11 @@ class PlannerAgent(NeuralAgent):
                     out = {}
                     best = plan_ranked(s, me, *self.value, self.horizon, self.fractions, self.top, self.mix, self.budget_ms, self.extras, self.look,
                                        judge=self.judge, pairs=self.pairs, out=out, reserved=(self.follow[1][0],) if self.follow else (),
-                                       pair_kinds=self.pair_kinds)
+                                       pair_kinds=self.pair_kinds, search=self.search, search_ms=self.search_ms)
                     if "follow" in out:
                         self.follow = (game_state.game_tick + out["follow"][0], out["follow"][1], out["follow"][2])
+                    if "search" in out:  # ticks the play-outs reached (None: no time), for checking
+                        self.searched.append(out["search"])
                 except Exception as e:  # fall back to the hand-written score
                     print("PlannerAgent value error:", repr(e), flush=True)
                     best = plan(s, me, self.horizon, self.fractions, extras=self.extras)
