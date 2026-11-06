@@ -485,6 +485,29 @@ Colab (the entry without it 6 to 9 ms), and a game's average goes up to 120 ms o
 league's WebSocket protocol (`main.py`'s server, timed from the client as their runner times it; their Kotlin runner
 was not run for this), 20 games on 12- to 30-planet maps: slowest move 158 ms, none over 200, and it won 17.
 
+**More cores (`PW_SEARCH_PROCS`, off).** One process plays the options forward about 16 ticks on a 12-planet map, 10 on
+20 and 5 on 30, short of the 30 asked for. `PW_SEARCH_PROCS=auto` starts a helper process per core (at most one per
+option, forked once; if one fails or is late the search drops back to one process). The processes share the options, the
+depth is the least any reached, and the values are the same as with one process (`tests/test_playout.py` checks this).
+Depth then reaches 30 on 12 and 20 planets and 15 on 30. Against the same entry on one core (4 cores here, 100 games on
+shared maps): 57 points (0.57, standard error 0.05), by map size 26/48 on 10 to 16 planets, 17/26 on 18 to 22 and 14/26 on
+24 to 30. One move was slow, and a game's average rises to about 120 ms on 28 planets. That leans towards better but is
+not conclusive, and it depends on the league's machine having spare cores, so the default stays at one process.
+
+**Any number of ships (`PW_TUNE`, off, worse).** The planner sends a fraction of a planet's ships, one of a few fixed
+sizes. `PW_TUNE=pick` tries 12 sizes for the launch it settled on (from one ship to all, around what the target needs)
+and keeps the one the projection plus network values highest; `PW_TUNE=opts` does that for each option the play-outs
+compare. Against the plain searching entry on 200 Colab games, `pick` scored 91 (0.455) and `opts` 85 (0.425), both a
+little below even. The value network is no better at telling sizes apart than it is at telling launches apart, so the
+extra freedom picks sizes it likes and the fixed ones do better.
+
+**Travel times in the network (`--dist`, did not help).** The value network sees each planet's position and speed but
+not the distances between planets; the policy's pair features have the arrival time. `pwjax.lvalue train --dist` adds a
+bias to each attention head from the travel times (`l{i}.ab`, zero at the start, and `entry/pwnet.py` reads it when it
+is there; `tests/test_planner.py` checks it against the JAX network). Trained from the entry's network for 2000 steps on
+fresh games, held-out error 0.2502 with it, 0.2501 without and 0.2507 at the start, and in 1,024 games against the
+entry's network each scored 0.498 and 0.500. The entry keeps its network.
+
 The earlier value network in "A value function trained on game results (did not help)" below was asked a
 different question, which of the policy's own moves is worth most, and the policy's moves were not where
 the gap was.
