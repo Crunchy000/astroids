@@ -525,8 +525,19 @@ entry's network each scored 0.498 and 0.500. The entry keeps its network.
   rows of 30 or 64). That is about a quarter faster, the same values to float32 rounding.
 
 The network is now three quarters of a play-out's time, and its matrix products already run near the machine's speed,
-so going further means fewer or smaller network calls in the play-outs. `PW_SEARCH=4:30:8` has the planner in the
-play-outs re-rank 8 launches instead of 16.
+so going further means fewer or smaller network calls in the play-outs. The third number of `PW_SEARCH` (default 16)
+is how many launches the planner inside the play-outs re-ranks with the network. Three other ways to spend the time,
+each 200 Colab games against the default (`4:30`, same seed and maps), and none beat it, so it stays:
+
+| `PW_SEARCH` | Points | 10 to 16 planets | 18 to 22 | 24 to 30 |
+|---|---:|---:|---:|---:|
+| `4:30:8` (cheaper moves in the play-outs, so deeper) | 86 (0.43) | 36/74 | 20/50 | 30/76 |
+| `4:30:32` (better moves in the play-outs, shallower) | 93 (0.465) | 33/74 | 22/50 | 38/76 |
+| `6:30` (6 options instead of 4) | 93 (0.465) | 31/74 | 22/50 | 40/76 |
+
+The standard error is 0.035, so only `4:30:8` is clearly worse: on the big maps, deeper play-outs with rougher moves
+lost (30/76). How the 150 ms is split looks close to its best now; more strength has to come from better moves or
+values per network call, not from more of them.
 
 | Planets | Depth before (median, 10th percentile) | After |
 |---:|---:|---:|
