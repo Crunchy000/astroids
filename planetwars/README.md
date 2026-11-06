@@ -485,8 +485,8 @@ Colab (the entry without it 6 to 9 ms), and a game's average goes up to 120 ms o
 league's WebSocket protocol (`main.py`'s server, timed from the client as their runner times it; their Kotlin runner
 was not run for this), 20 games on 12- to 30-planet maps: slowest move 158 ms, none over 200, and it won 17.
 
-**More cores (`PW_SEARCH_PROCS`, off).** One process plays the options forward about 16 ticks on a 12-planet map, 10 on
-20 and 5 on 30, short of the 30 asked for. `PW_SEARCH_PROCS=auto` starts a helper process per core (at most one per
+**More cores (`PW_SEARCH_PROCS`, off).** Before the compiled play-outs below, one process played the options forward
+about 16 ticks on a 12-planet map, 10 on 20 and 5 on 30, short of the 30 asked for. `PW_SEARCH_PROCS=auto` starts a helper process per core (at most one per
 option, forked once; if one fails or is late the search drops back to one process). The processes share the options, the
 depth is the least any reached, and the values are the same as with one process (`tests/test_playout.py` checks this).
 Depth then reaches 30 on 12 and 20 planets and 15 on 30. Against the same entry on one core (4 cores here, 100 games on
@@ -507,6 +507,39 @@ bias to each attention head from the travel times (`l{i}.ab`, zero at the start,
 is there; `tests/test_planner.py` checks it against the JAX network). Trained from the entry's network for 2000 steps on
 fresh games, held-out error 0.2502 with it, 0.2501 without and 0.2507 at the start, and in 1,024 games against the
 entry's network each scored 0.498 and 0.500. The entry keeps its network.
+
+**Faster play-outs (compiled, default).** Time was the limit: one process got the options about 17 ticks forward on a
+20-planet map (median) and 9 on 30, against the 30 asked for. Three changes that play the same moves, only sooner:
+
+- `entry/fastplan.py` is `planner.candidates` (the projection with nobody launching, every launch the rules allow and
+  where it leaves the map, the hand score) compiled with numba. With 12 to 30 planets numpy spent most of that call
+  starting small array operations. It adds and rounds in numpy's order (row sums pairwise as numpy sums them, fleet
+  distances as `np.linalg.norm` works them out), so the results are equal, not just close: `tests/test_fastplan.py`
+  compares every array on positions from real games. 1.0 ms became 0.06 ms a call. The image compiles it when it is
+  built (`Dockerfile`), so a game starts in under a second; without numba, or with `PW_NUMBA=0`, numpy is used.
+- In a play-out, every option's moves for both sides in a tick go through the network together
+  (`planner.plan_many`), and so do the options' end values (`playout.end_values`); the picks are the same as one at a
+  time (checked on 928 moves).
+- The network's softmax shifts by one maximum per position instead of per row and divides after the product with the
+  values, and layer norm takes its means as a matrix-vector product (`pwnet.value_fast`; numpy is slow at reducing
+  rows of 30 or 64). That is about a quarter faster, the same values to float32 rounding.
+
+The network is now three quarters of a play-out's time, and its matrix products already run near the machine's speed,
+so going further means fewer or smaller network calls in the play-outs. `PW_SEARCH=4:30:8` has the planner in the
+play-outs re-rank 8 launches instead of 16.
+
+| Planets | Depth before (median, 10th percentile) | After |
+|---:|---:|---:|
+| 12 | 30, 10 | 30, 30 |
+| 20 | 17, 8 | 30, 25 |
+| 30 | 9, 4 | 16, 10 |
+
+Against the entry as committed before (`tools/entry_match.py --b-dir`, which runs an older `entry/` in a process of its
+own), 200 Colab games: 114 points (0.57, standard error 0.035), no move over 200 ms on either side, and the faster
+entry's moves took less time on average (22 to 44 ms a game against 27 to 50). By map size: 45/60 on 10 to 16 planets,
+24/50 on 18 to 22 and 45/90 on 24 to 30, so the gain so far is on the small maps, where nearly every move now gets the
+full 30 ticks. Served over the league's WebSocket protocol from a Python 3.11 copy of the image (6 games, 18 to 26
+planets, against the entry without play-outs): slowest move 168 ms, none over 200, and it won 5.
 
 The earlier value network in "A value function trained on game results (did not help)" below was asked a
 different question, which of the policy's own moves is worth most, and the policy's moves were not where

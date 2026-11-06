@@ -240,10 +240,30 @@ def prepare(params, heads):
 
 def _norm(x):
     """Layer norm of the rows of a 2-D array, without gain and bias (those are folded into the next matrix by `prepare`)."""
-    c = x - x.mean(axis=-1, keepdims=True)
-    var = np.einsum("ij,ij->i", c, c)[:, None] * (1.0 / x.shape[-1])
-    c *= 1.0 / np.sqrt(var + 1e-5)
+    w = np.full(x.shape[-1], 1.0 / x.shape[-1], x.dtype)  # means as a matrix-vector product: faster than mean()
+    c = x - (x @ w)[:, None]
+    var = np.einsum("ij,ij->i", c, c) * (1.0 / x.shape[-1])
+    c *= (1.0 / np.sqrt(var + 1e-5))[:, None]
     return c
+
+
+def _softmax_v(att, v):
+    """softmax(att) @ v over the last axis of att [B, heads, N, N], for v [B, heads, N, dh]. Shifted by one maximum per
+    position rather than per row (a reduction along rows of N is slow in numpy), and normalised after the product (N
+    times fewer divisions); a row that ends up far below its position's maximum is done the usual way instead."""
+    b, n = att.shape[0], att.shape[-1]
+    raw = att.copy()
+    att -= att.reshape(b, -1).max(axis=1)[:, None, None, None]
+    np.exp(att, out=att)
+    tot = att.reshape(-1, n) @ np.ones(n, att.dtype)
+    if not tot.min() > 1e-30:
+        raw -= raw.max(axis=-1, keepdims=True)
+        np.exp(raw, out=raw)
+        raw *= 1.0 / raw.sum(axis=-1, keepdims=True)
+        return raw @ v
+    out = att @ v
+    out *= (1.0 / tot).reshape(att.shape[:-1] + (1,))
+    return out
 
 
 def value_fast(prep, planet, glob, valid, dist=None):
@@ -268,10 +288,7 @@ def value_fast(prep, planet, glob, valid, dist=None):
             att += _att_bias(np, dist, L["ab"]).astype(att.dtype)
         if mask is not None:
             att += mask
-        att -= att.max(axis=-1, keepdims=True)
-        np.exp(att, out=att)
-        att *= 1.0 / att.sum(axis=-1, keepdims=True)
-        h = h + (att @ qkv[2]).transpose(0, 2, 1, 3).reshape(b * n, dm) @ L["wo"]
+        h = h + _softmax_v(att, qkv[2]).transpose(0, 2, 1, 3).reshape(b * n, dm) @ L["wo"]
         h += L["bo"]
         u = _norm(h) @ L["w1"]
         u += L["b1"]

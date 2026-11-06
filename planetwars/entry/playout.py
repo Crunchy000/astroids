@@ -80,23 +80,43 @@ def can_launch(s, player):
     return bool(((s.owner == player) & ~s.tr_on & (s.ships >= 1.0)).any())
 
 
-def end_value(s, me, params, heads, horizon, mix):
-    """What a play-out's last position is worth to `me`, as the entry ranks a projection: nobody launches for
-    `horizon` ticks, then the network mixed with the hand score (10 more or less for a clear win or loss). A game
-    that ended counts 10 for a win, -10 for a loss."""
+def end_values(states, me, params, heads, horizon, mix):
+    """What each play-out's last position (all at the same tick) is worth to `me`, as the entry ranks a projection:
+    nobody launches for `horizon` ticks, then the network mixed with the hand score (10 more or less for a clear win or
+    loss), all through the network in one pass. A game that ended counts 10 for a win, -10 for a loss."""
     import planner as P
-    if over(s):
-        mine = s.ships[s.owner == me].sum()
-        theirs = s.ships[s.owner == 3 - me].sum()
-        return 10.0 * float(np.sign(mine - theirs))
-    h = max(1, min(horizon, int(s.max_ticks - s.tick)))
-    a1, a2 = P.arrivals(s, h)
-    po, ps = P.base_states(s.owner.copy(), s.ships.copy(), s.growth, a1, a2)
-    o, sh = P.run(po[-1], ps[-1], s.growth, a1[-1:], a2[-1:])
-    d = np.sqrt(((s.pos[:, None, :] - s.pos[None, :, :]) ** 2).sum(-1))
-    near = (d <= 160.0) & ~np.eye(s.ships.shape[0], dtype=bool)
-    hand = P.score(o[None], sh[None], s, me, near)
-    return float(P.totals_of(params, heads, s, me, [o], [sh], hand, s.tick + h, mix)[0])
+    vals, live, owners, shipss, hands = [0.0] * len(states), [], [], [], []
+    for m, s in enumerate(states):
+        if over(s):
+            mine = s.ships[s.owner == me].sum()
+            theirs = s.ships[s.owner == 3 - me].sum()
+            vals[m] = 10.0 * float(np.sign(mine - theirs))
+            continue
+        h = max(1, min(horizon, int(s.max_ticks - s.tick)))
+        if P.fastplan is not None:
+            o, sh, hand = P.fastplan.base(s, me, h)
+        else:
+            a1, a2 = P.arrivals(s, h)
+            po, ps = P.base_states(s.owner.copy(), s.ships.copy(), s.growth, a1, a2)
+            o, sh = P.run(po[-1], ps[-1], s.growth, a1[-1:], a2[-1:])
+            d = np.sqrt(((s.pos[:, None, :] - s.pos[None, :, :]) ** 2).sum(-1))
+            near = (d <= 160.0) & ~np.eye(s.ships.shape[0], dtype=bool)
+            hand = P.score(o[None], sh[None], s, me, near)[0]
+        live.append((m, s, h))
+        owners.append(o)
+        shipss.append(sh)
+        hands.append(hand)
+    if live:
+        _, s, h = live[0]
+        tot = P.totals_of(params, heads, s, me, owners, shipss, np.array(hands), s.tick + h, mix)
+        for (m, _, _), t in zip(live, tot):
+            vals[m] = float(t)
+    return vals
+
+
+def end_value(s, me, params, heads, horizon, mix):
+    """`end_values` of one position."""
+    return end_values([s], me, params, heads, horizon, mix)[0]
 
 
 COST = {"roll": 0.005, "value": 0.004}  # recent seconds per planner call in a play-out and per option valued
@@ -114,26 +134,30 @@ def advance(s, me, firsts, opp, ticks, deadline, params, heads, roll_top, horizo
     sides moved by the planner, until `ticks` ticks are played or a planner call would not fit before `deadline`
     less `reserve` seconds. Returns (ticks played, states after each tick: hist[k][i] is option i after k + 1)."""
     import planner as P
-    slowest = [max(COST["roll"], hint)]
+    slowest = max(COST["roll"], hint)  # seconds per planner move, the most seen
 
-    def roll(st, side):
-        if not can_launch(st, side):
-            return None
-        t = time.perf_counter()
-        if t + 1.25 * max(slowest) + reserve > deadline:
-            raise OutOfTime
-        a = P.plan_ranked(st, side, params, heads, horizon, P.FRACTIONS, roll_top, mix, 1e9, extras, look="",
-                          pairs=0, pair_kinds="")
-        dt = time.perf_counter() - t
-        slowest.append(dt)
-        COST["roll"] = 0.9 * COST["roll"] + 0.1 * dt
-        return a
+    def roll(sts):
+        """The next tick of every option: the moves of every side that can launch, found in one batch."""
+        need = [(k, side) for k, st in enumerate(sts) if not over(st) for side in (1, 2) if can_launch(st, side)]
+        moves = {}
+        if need:
+            nonlocal slowest
+            t = time.perf_counter()
+            if t + 1.25 * slowest * len(need) + reserve > deadline:
+                raise OutOfTime
+            acts = P.plan_many([(sts[k], side) for k, side in need], params, heads, horizon, P.FRACTIONS, roll_top,
+                               mix, extras)
+            per = (time.perf_counter() - t) / len(need)
+            slowest = max(slowest, per)
+            COST["roll"] = 0.9 * COST["roll"] + 0.1 * per
+            moves = dict(zip(need, acts))
+        return [st if over(st) else step(st, moves.get((k, 1)), moves.get((k, 2))) for k, st in enumerate(sts)]
 
     states = [step(s, a if me == 1 else opp, opp if me == 1 else a) for a in firsts]
     hist = [states]
     try:
         while len(hist) < ticks:
-            hist.append([st if over(st) else step(st, roll(st, 1), roll(st, 2)) for st in hist[-1]])
+            hist.append(roll(hist[-1]))
     except OutOfTime:
         pass
     return len(hist), hist
@@ -141,7 +165,7 @@ def advance(s, me, firsts, opp, ticks, deadline, params, heads, roll_top, horizo
 
 def values(states, me, params, heads, horizon, mix):
     t = time.perf_counter()
-    v = [end_value(st, me, params, heads, horizon, mix) for st in states]
+    v = end_values(states, me, params, heads, horizon, mix)
     COST["value"] = 0.9 * COST["value"] + 0.1 * (time.perf_counter() - t) / max(1, len(states))
     return v
 

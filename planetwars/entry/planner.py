@@ -23,6 +23,13 @@ import pwnet
 from agent import OWNER, NeuralAgent, arrays, load, choose
 from core.game_state import Action, Player
 
+try:  # `candidates` compiled (fastplan.py): the same numbers, several times faster; PW_NUMBA=0 for numpy
+    if os.environ.get("PW_NUMBA", "1") == "0":
+        raise ImportError
+    import fastplan
+except ImportError:
+    fastplan = None
+
 HORIZON = int(os.environ.get("PW_HORIZON", "90"))
 AMOUNTS = os.environ.get("PW_AMOUNTS", "0.25,0.5,1.0")
 FRACTIONS = tuple(float(x) for x in AMOUNTS.split(","))
@@ -43,7 +50,8 @@ PAIRS = int(os.environ.get("PW_PAIRS", "200"))   # before this tick, also try tw
 PAIR_KINDS = os.environ.get("PW_PAIR_KINDS", "n")  # two-planet launches at: n neutrals (before PAIRS), e enemy planets, d ours about to fall; b: the second planet may be busy now
 PAIR_MOST = 16                                  # most such pairs scored by the network
 PAIR_WAIT = 30                                  # most ticks the second planet of a pair holds its ships for its launch
-SEARCH = os.environ.get("PW_SEARCH", "4:30")    # 'K:T': play the best K options T ticks forward (see playout.search); empty: off
+SEARCH = os.environ.get("PW_SEARCH", "4:30")    # 'K:T[:R]': play the best K options T ticks forward, both sides moved by
+                                                # the planner re-ranking R launches (16; see playout.search); empty: off
 SEARCH_MS = float(os.environ.get("PW_SEARCH_MS", "150"))      # play-outs stop this many ms into the move
 SEARCH_RANK_MS = float(os.environ.get("PW_SEARCH_RANK_MS", "50"))  # with play-outs, re-ranking stops this many ms in
 TUNE = os.environ.get("PW_TUNE", "")             # fine-tune fleet sizes (see `tune_sizes`): 'pick' the launch played,
@@ -206,6 +214,8 @@ def candidates(s, me, horizon=HORIZON, fractions=FRACTIONS, extra=None, extras=(
     earlier size for the same source and target. With `keep`, the dict also holds what `replies` needs: the arrivals
     (a1, a2), distances (d), the score's neighbours (near) and the projection tick by tick (po, ps).
     """
+    if fastplan is not None and not extra:
+        return fastplan.candidates(s, me, horizon, fractions, extras, keep, reserved, parse_size)
     n = s.ships.shape[0]
     horizon = max(1, min(horizon, int(s.max_ticks - s.tick)))
     a1, a2 = arrivals(s, horizon)
@@ -575,6 +585,54 @@ def totals_of(params, heads, s, me, owners, shipss, hand, tick, mix):
             + np.where(won & ~lost, 10.0, 0.0) - np.where(lost & ~won, 10.0, 0.0))
 
 
+def plan_many(items, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=TOP, mix=MIX, extras=()):
+    """`plan_ranked` with no time limit and no look-ahead, pairs or search, for several positions of one game at the
+    same tick (the play-outs' moves: every option, both sides): all their launches go through the network in one pass,
+    which costs less than a pass each. `items`: [(s, me)]. Returns each one's (src, dst, ships), or None to wait."""
+    out, jobs, planets, globs = [None] * len(items), [], [], []
+    dtype = next(iter(params.values())).dtype
+    for m, (s, me) in enumerate(items):
+        c = candidates(s, me, horizon, fractions, None, extras)
+        if c is None:
+            continue
+        order = np.argsort(-c["score"], kind="stable")[:top]
+        _, first, same = np.unique(np.concatenate([c["owner"][order], c["ships"][order]], 1), axis=0,
+                                   return_index=True, return_inverse=True)
+        rep = first[same.reshape(-1)]
+        fresh = np.nonzero(rep == np.arange(order.size))[0]
+        idx = order[fresh]
+        owners = np.concatenate([c["owner"][idx], c["base_owner"][None]])
+        shipss = np.concatenate([c["ships"][idx], c["base_ships"][None]])
+        hand = np.concatenate([c["score"][idx], [c["base"]]])
+        planet, glob = still_features(s, me, owners, shipss, s.tick + c["horizon"], dtype)
+        planets.append(planet)
+        globs.append(glob)
+        jobs.append((m, me, c, order, rep, fresh, owners, hand))
+    if not jobs:
+        return out
+    s0 = items[jobs[0][0]][0]
+    planet, glob = np.concatenate(planets), np.concatenate(globs)
+    valid = np.broadcast_to(s0.valid, planet.shape[:2])
+    dist = pwnet.dist_features(np, s0.pos, s0.speed) if pwnet.has_dist(params) else None
+    v_all = np.asarray(pwnet.value_fast(pwnet.prepare(params, heads), planet, glob, valid, dist), float)
+    lo = 0
+    for m, me, c, order, rep, fresh, owners, hand in jobs:
+        v = v_all[lo:lo + len(owners)]
+        lo += len(owners)
+        won, lost = ~(owners == 3 - me).any(-1), ~(owners == me).any(-1)
+        t = ((1.0 - mix) * v + mix * np.tanh(hand / 200.0)
+             + np.where(won & ~lost, 10.0, 0.0) - np.where(lost & ~won, 10.0, 0.0))
+        tot = np.zeros(order.size)
+        tot[fresh] = t[:-1]
+        cut = min(CHUNK, order.size)  # waiting goes after the first eight, as in plan_ranked
+        seen_k = np.concatenate([order[:cut], [-1], order[cut:]]).astype(int)
+        seen_t = np.concatenate([tot[rep[:cut]], [t[-1]], tot[rep[cut:]]])
+        k = int(seen_k[int(np.argmax(seen_t))])
+        if k >= 0:
+            out[m] = int(c["ci"][k]), int(c["cj"][k]), float(c["cn"][k])
+    return out
+
+
 def tune_sizes(s, me, c, ks, params, heads, mix, sizes=TUNE_SIZES):
     """The best whole number of ships for each of the launches `ks` (indices into `c`, which needs `keep`), keeping its
     source and target: `sizes` sizes evenly spaced from 1 to all the source holds, just enough to take the target when
@@ -697,7 +755,8 @@ def plan_ranked(s, me, params, heads, horizon=HORIZON, fractions=FRACTIONS, top=
             launch = [m for m, a in enumerate(acts) if a is not None]
             for m, (x, _) in zip(launch, tune_sizes(s, me, c, [int(seen_k[pick[m]]) for m in launch], params, heads, mix)):
                 acts[m] = (acts[m][0], acts[m][1], x)
-        r = playout.search(s, me, params, heads, acts, search[1], started + search_ms / 1000.0, horizon=horizon, mix=mix,
+        r = playout.search(s, me, params, heads, acts, search[1], started + search_ms / 1000.0,
+                           roll_top=search[2] if len(search) > 2 else 16, horizon=horizon, mix=mix,
                            extras=extras, hint=t_cand, procs=search_procs)
         if out is not None:
             out["search"] = None if r is None else r[2]
@@ -754,6 +813,18 @@ def speed_ratio(net, judge, n=30, reps=5):
     return max(1.0, took(*judge) / took(*net))
 
 
+def _warm_fast():
+    """Compile fastplan (or load it from numba's cache) now rather than in the first move; numpy if that fails."""
+    global fastplan
+    if fastplan is not None and not getattr(fastplan, "warmed", False):
+        try:
+            fastplan.warm()
+            fastplan.warmed = True
+        except Exception as e:
+            print("planner: fastplan unavailable, using numpy:", repr(e), flush=True)
+            fastplan = None
+
+
 class PlannerAgent(NeuralAgent):
     """Tries every launch each tick (see the module docstring)."""
 
@@ -761,6 +832,7 @@ class PlannerAgent(NeuralAgent):
                  look=LOOK, judge=JUDGE, pairs=PAIRS, pair_kinds=PAIR_KINDS, search=SEARCH, search_ms=SEARCH_MS,
                  search_rank_ms=SEARCH_RANK_MS, search_procs=None, tune=TUNE):
         super().__init__()
+        _warm_fast()
         self.search = tuple(int(x) for x in str(search).split(":")) if search else None
         self.search_ms, self.search_procs, self.searched, self.tune = search_ms, search_procs, [], tune
         if self.search:

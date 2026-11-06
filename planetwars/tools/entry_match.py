@@ -4,7 +4,8 @@ Each map is played from both sides. Settings are PlannerAgent keyword arguments,
 
     python tools/entry_match.py --a "" --b "pairs=2000" --maps 300 --procs 12 --out runs/pairs.jsonl
 
-prints one JSON line per game (and appends it to --out), then a summary of A's score. Maps follow the live league
+prints one JSON line per game (and appends it to --out), then a summary of A's score. With --b-dir, side B is the entry
+in that directory instead (say, an older commit's `entry/`), run in a process of its own so it keeps its own code. Maps follow the live league
 (GameParamGenerator.randomParams(): 10 to 30 planets, neutral ratio 0.25 to 0.35, growth 0.05 to 0.2, speed 2 to 5,
 2000 ticks), seeded by map number, so two runs with the same --seed play the same maps. Each side keeps the entry's
 own time budget; the engine does not enforce the league's limit, but moves slower than --slow ms are counted.
@@ -48,19 +49,56 @@ def league_params(rng):
                       min_growth_rate=0.05, max_growth_rate=0.2, transporter_speed=rng.uniform(2.0, 5.0), max_ticks=2000)
 
 
+def _serve(conn, path, kw):
+    """Side B from another entry directory: answers prepare_to_play_as and get_action sent over `conn`."""
+    sys.path.insert(0, path)
+    from planner import PlannerAgent
+    agent = PlannerAgent(**kw)
+    while True:
+        msg = conn.recv()
+        if msg[0] == "prep":
+            agent.prepare_to_play_as(msg[1], msg[2])
+            conn.send(None)
+        elif msg[0] == "act":
+            conn.send(agent.get_action(msg[1]))
+        else:
+            return
+
+
+class Elsewhere:
+    """An entry from another directory, in its own process (so its modules are its own), as a player."""
+
+    def __init__(self, path, kw):
+        self.conn, child = mp.get_context("spawn").Pipe()
+        self.proc = mp.get_context("spawn").Process(target=_serve, args=(child, path, kw))
+        self.proc.start()
+
+    def prepare_to_play_as(self, player, params):
+        self.conn.send(("prep", player, params))
+        self.conn.recv()
+
+    def get_action(self, state):
+        self.conn.send(("act", state))
+        return self.conn.recv()
+
+    def close(self):
+        self.conn.send(("stop",))
+        self.proc.join(10)
+
+
 def play(job):
     """One game: (map number, side A plays, settings A, settings B, seed, slow ms) -> result dict."""
     from core.forward_model import ForwardModel
     from core.game_state import Player
     from core.game_state_factory import GameStateFactory
     from planner import PlannerAgent
-    m, a_side, a_kw, b_kw, seed, slow = job
+    m, a_side, a_kw, b_kw, seed, slow, b_dir = job
     rng = random.Random(seed * 100003 + m)
     params = league_params(rng)
     random.seed(seed * 100003 + m)
     gs = GameStateFactory(params).create_game()
     pa = Player.Player1 if a_side == 1 else Player.Player2
-    agents = {pa: PlannerAgent(**a_kw), pa.opponent(): PlannerAgent(**b_kw)}
+    agents = {pa: PlannerAgent(**a_kw), pa.opponent(): Elsewhere(b_dir, b_kw) if b_dir else PlannerAgent(**b_kw)}
     for p, ag in agents.items():
         ag.prepare_to_play_as(p, params)
     model = ForwardModel(copy.deepcopy(gs), params)
@@ -72,6 +110,8 @@ def play(job):
             acts[p] = ag.get_action(model.state)
             took[p].append((time.perf_counter() - t0) * 1000)
         model.step(acts)
+    if b_dir:
+        agents[pa.opponent()].close()
     lead = model.get_leader()
     score = 1.0 if lead == pa else 0.0 if lead == pa.opponent() else 0.5
     ta, tb = took[pa], took[pa.opponent()]
@@ -84,6 +124,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--a", default="", help="PlannerAgent settings of the side being tested")
     ap.add_argument("--b", default="", help="settings of its opponent (default: the entry as it is)")
+    ap.add_argument("--b-dir", default="", help="the opponent is the entry in this directory (with --b's settings)")
     ap.add_argument("--maps", type=int, default=100)
     ap.add_argument("--first", type=int, default=0, help="first map number")
     ap.add_argument("--procs", type=int, default=os.cpu_count())
@@ -92,7 +133,7 @@ def main():
     ap.add_argument("--out", default="")
     args = ap.parse_args()
     a_kw, b_kw = parse(args.a), parse(args.b)
-    jobs = [(m, side, a_kw, b_kw, args.seed, args.slow) for m in range(args.first, args.first + args.maps) for side in (1, 2)]
+    jobs = [(m, side, a_kw, b_kw, args.seed, args.slow, args.b_dir) for m in range(args.first, args.first + args.maps) for side in (1, 2)]
     pts = n = 0
     t0 = time.time()
     f = open(args.out, "a") if args.out else None
@@ -100,7 +141,7 @@ def main():
     with ProcessPoolExecutor(args.procs, mp_context=mp.get_context("spawn")) as pool:
         for r in (fut.result() for fut in as_completed([pool.submit(play, j) for j in jobs])):
             pts, n = pts + r["a_score"], n + 1
-            line = json.dumps(dict(a=args.a, b=args.b, seed=args.seed, **r))
+            line = json.dumps(dict(a=args.a, b=args.b + (f" @{args.b_dir}" if args.b_dir else ""), seed=args.seed, **r))
             print(line, flush=True)
             if f:
                 f.write(line + "\n")
